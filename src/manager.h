@@ -1,5 +1,5 @@
 /*
- * interfaces.h
+ * manager.h
  * This file is part of Network-inador
  *
  * Copyright (C) 2011 - Félix Arreola Rodríguez
@@ -20,26 +20,12 @@
  * Boston, MA  02110-1301  USA
  */
 
-#ifndef __INTERFACES_H__
-#define __INTERFACES_H__
-
-#include <asm/types.h>
-#include <sys/socket.h>
-#include <linux/netlink.h>
+#ifndef __MANAGER_H__
+#define __MANAGER_H__
 
 #include "network-inador.h"
 
-extern int global_nl_seq;
-
-void interfaces_list_all (NetworkInadorHandle *handle, int sock);
-Interface * interfaces_locate_by_index (Interface *list, int index);
-void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlmsghdr *h);
-void interfaces_del_rtnl_link (NetworkInadorHandle *handle, struct nlmsghdr *h);
-void interfaces_add_or_update_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr *h);
-void interfaces_del_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr *h);
-
-void interfaces_clear_all_ipv4_address (NetworkInadorHandle *handle, Interface *interface);
-void interfaces_manual_add_ipv4 (int sock, Interface *interface, IPv4 *address);
+int manager_setup_socket (NetworkInadorHandle *handle);
 
 #endif
 

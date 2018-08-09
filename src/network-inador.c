@@ -43,6 +43,7 @@
 #include "network-inador.h"
 #include "interfaces.h"
 #include "events.h"
+#include "manager.h"
 
 static GMainLoop *loop = NULL;
 
@@ -88,11 +89,14 @@ int main (int argc, char *argv[]) {
 	Interface *to_up;
 	
 	nl_sock = create_ntlink_socket (0);
+	handle.netlink_sock_request = nl_sock;
 	nl_watch = create_ntlink_socket (-1);
 	
 	interfaces_list_all (&handle, nl_sock);
 	
 	events_setup_loop (&handle, nl_watch);
+	
+	manager_setup_socket (&handle);
 	
 	g_main_loop_run (loop);
 	

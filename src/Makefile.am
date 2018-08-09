@@ -4,6 +4,7 @@ bin_PROGRAMS = network-inador
 network_inador_SOURCES = network-inador.c network-inador.h \
 	events.c events.h \
 	interfaces.c interfaces.h \
+	manager.c manager.h \
 	utils.c utils.h
 
 #network_inador_CPPFLAGS = -DGAMEDATA_DIR=\"$(gamedatadir)/\" -DLOCALEDIR=\"$(localedir)\" $(AM_CPPFLAGS)

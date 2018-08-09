@@ -23,6 +23,10 @@
 #ifndef __NETWORK_INADOR_H__
 #define __NETWORK_INADOR_H__
 
+#include <netinet/in.h>
+#include <linux/if.h>
+#include <net/ethernet.h>
+
 typedef struct _IPv4 {
 	struct in_addr sin_addr;
 	uint32_t prefix;
@@ -52,6 +56,7 @@ typedef struct _Interface {
 
 typedef struct {
 	Interface *interfaces;
+	int netlink_sock_request;
 } NetworkInadorHandle;
 
 #endif
