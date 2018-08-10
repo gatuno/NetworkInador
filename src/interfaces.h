@@ -40,6 +40,7 @@ void interfaces_del_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr *h);
 
 void interfaces_clear_all_ipv4_address (NetworkInadorHandle *handle, Interface *interface);
 void interfaces_manual_add_ipv4 (int sock, Interface *interface, IPv4 *address);
+void interfaces_bring_up (int sock, Interface *interface);
 
 #endif
 
