@@ -44,6 +44,7 @@
 #include "interfaces.h"
 #include "events.h"
 #include "manager.h"
+#include "bridge.h"
 
 static GMainLoop *loop = NULL;
 
