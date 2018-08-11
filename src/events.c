@@ -92,7 +92,7 @@ static gboolean _events_handle_read (GIOChannel *source, GIOCondition condition,
 		printf ("Msg type: %i\n", msg_ptr->nlmsg_type);
 		if (msg_ptr->nlmsg_type == RTM_NEWLINK) {
 			printf ("Mensaje dinámico de nueva interfaz\n");
-			interfaces_add_or_update_rtnl_link (handle, msg_ptr);
+			interfaces_add_or_update_rtnl_link (handle, msg_ptr, 0);
 		} else if (msg_ptr->nlmsg_type == RTM_DELLINK) {
 			printf ("Mensaje dinámico de eliminar interfaz\n");
 			interfaces_del_rtnl_link (handle, msg_ptr);

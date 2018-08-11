@@ -178,7 +178,7 @@ static void _interfaces_list_ipv4_address (NetworkInadorHandle *handle, int sock
 	}
 }
 
-void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlmsghdr *h) {
+void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlmsghdr *h, int first_time) {
 	struct ifinfomsg *iface;
 	struct rtattr *attribute;
 	int len;
@@ -187,7 +187,7 @@ void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlm
 	iface = NLMSG_DATA(h);
 	len = h->nlmsg_len - NLMSG_LENGTH (sizeof (struct ifinfomsg));
 	
-	printf ("Mensaje de nueva interfaz\n");
+	printf ("Mensaje de nueva interfaz: %i\n", iface->ifi_index);
 	new = interfaces_locate_by_index (handle->interfaces, iface->ifi_index);
 	
 	/* Si el objeto interface no existe, crearlo y ligarlo en la lista de interfaces */
@@ -208,6 +208,19 @@ void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlm
 			
 			last->next = new;
 		}
+	}
+	
+	if (iface->ifi_family == AF_BRIDGE) {
+		/* Tenemos un evento especial, se está agregando una interfaz a un bridge */
+		for (attribute = IFLA_RTA(iface); RTA_OK(attribute, len); attribute = RTA_NEXT(attribute, len)) {
+			switch(attribute->rta_type) {
+				case IFLA_MASTER:
+					memcpy (&new->master_index, RTA_DATA (attribute), 4);
+					break;
+			}
+		}
+		
+		return;
 	}
 	
 	new->ifi_type = iface->ifi_type;
@@ -240,8 +253,19 @@ void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlm
 			case IFLA_WIRELESS:
 				/* TODO: Procesar enlaces los mensajes de enlaces inalambricos */
 				break;
+			case IFLA_MASTER:
+				if (first_time) {
+					memcpy (&new->master_index, RTA_DATA (attribute), 4);
+					printf ("Interface %d has master: %i\n", iface->ifi_index, new->master_index);
+				}
+				break;
+			case IFLA_MTU:
+					memcpy (&new->mtu, RTA_DATA (attribute), attribute->rta_len);
+					
+					printf ("Interface %d has mtu: %u\n", iface->ifi_index, new->mtu);
+				break;
 			//default:
-				//printf ("RTA Attribute \"%i\" no procesado\n", attribute->rta_type);
+				//printf ("RTA Attribute \"%hu\" no procesado\n", attribute->rta_type);
 		}
 	}
 }
@@ -250,8 +274,14 @@ void interfaces_del_rtnl_link (NetworkInadorHandle *handle, struct nlmsghdr *h) 
 	struct ifinfomsg *iface;
 	Interface *to_del, *last;
 	IPv4 *address;
-	iface = NLMSG_DATA(h);
+	struct rtattr *attribute;
+	int len;
+	int index;
 	
+	iface = NLMSG_DATA(h);
+	len = h->nlmsg_len - NLMSG_LENGTH (sizeof (struct ifinfomsg));
+	
+	printf ("Mensaje de eliminar interfaz: %i\n", iface->ifi_index);
 	to_del = interfaces_locate_by_index (handle->interfaces, iface->ifi_index);
 	
 	if (to_del == NULL) {
@@ -260,6 +290,21 @@ void interfaces_del_rtnl_link (NetworkInadorHandle *handle, struct nlmsghdr *h) 
 		return;
 	}
 	
+	if (iface->ifi_family == AF_BRIDGE) {
+		/* Tenemos un evento especial, se está eliminando una interfaz a un bridge */
+		for (attribute = IFLA_RTA(iface); RTA_OK(attribute, len); attribute = RTA_NEXT(attribute, len)) {
+			switch(attribute->rta_type) {
+				case IFLA_MASTER:
+					memcpy (&index, RTA_DATA (attribute), 4);
+					to_del->master_index = 0;
+					break;
+			}
+		}
+		
+		return;
+	}
+	
+	/* Borrar las estructuras IP que contenga */
 	address = to_del->v4_address;
 	
 	while (address != NULL) {
@@ -270,6 +315,7 @@ void interfaces_del_rtnl_link (NetworkInadorHandle *handle, struct nlmsghdr *h) 
 		address = to_del->v4_address;
 	}
 	
+	/* Borrar el objeto interfaz */
 	if (to_del == handle->interfaces) {
 		/* Primero de la lista */
 		
@@ -307,8 +353,8 @@ void interfaces_add_or_update_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr
 		return;
 	}
 	
-	printf ("IP para la interfaz: %d\n", addr->ifa_index);
-	size_t len = NLMSG_PAYLOAD(h, h->nlmsg_len);
+	printf ("IP para la interfaz: %d, de la familia: %d\n", addr->ifa_index, addr->ifa_family);
+	size_t len = IFA_PAYLOAD (h);
 	
 	for (attribute = IFA_RTA (addr); RTA_OK (attribute, len); attribute = RTA_NEXT (attribute, len)) {
 		//printf ("Attribute (addr): %d\n", attribute->rta_type);
@@ -319,7 +365,15 @@ void interfaces_add_or_update_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr
 			inet_ntop (AF_INET, &ip, ip_as_string, sizeof (ip_as_string));
 			printf ("Address: %s/%d\n", ip_as_string, addr->ifa_prefixlen);
 			break;
+		} else if (attribute->rta_type == IFA_ADDRESS && addr->ifa_family == AF_INET6) {
+			inet_ntop (AF_INET6, RTA_DATA (attribute), ip_as_string, sizeof (ip_as_string));
+			printf ("Address v6: %s/%d\n", ip_as_string, addr->ifa_prefixlen);
 		}
+	}
+	
+	if (addr->ifa_family != AF_INET) {
+		/* Por el momento, las direcciones IPv6 no son procesadas */
+		return;
 	}
 	
 	new = _interfaces_serach_ipv4 (iface, ip, prefix);
@@ -350,8 +404,8 @@ void interfaces_del_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr *h) {
 		return;
 	}
 	
-	printf ("IP eliminada para la interfaz: %d\n", addr->ifa_index);
-	size_t len = NLMSG_PAYLOAD(h, h->nlmsg_len);
+	printf ("IP eliminada para la interfaz: %d, de la familia: %d\n", addr->ifa_index, addr->ifa_family);
+	size_t len = IFA_PAYLOAD (h);
 	
 	for (attribute = IFA_RTA (addr); RTA_OK (attribute, len); attribute = RTA_NEXT (attribute, len)) {
 		//printf ("Attribute (addr): %d\n", attribute->rta_type);
@@ -362,7 +416,15 @@ void interfaces_del_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr *h) {
 			inet_ntop (AF_INET, &ip, ip_as_string, sizeof (ip_as_string));
 			printf ("Address: %s/%d\n", ip_as_string, addr->ifa_prefixlen);
 			break;
+		} else if (attribute->rta_type == IFA_ADDRESS && addr->ifa_family == AF_INET6) {
+			inet_ntop (AF_INET6, RTA_DATA (attribute), ip_as_string, sizeof (ip_as_string));
+			printf ("Address v6: %s/%d\n", ip_as_string, addr->ifa_prefixlen);
 		}
+	}
+	
+	if (addr->ifa_family != AF_INET) {
+		/* Por el momento, las direcciones IPv6 no son procesadas */
+		return;
 	}
 	
 	new = _interfaces_serach_ipv4 (iface, ip, prefix);
@@ -725,7 +787,7 @@ void interfaces_list_all (NetworkInadorHandle *handle, int sock) {
 		for (; NLMSG_OK(msg_ptr, len); msg_ptr = NLMSG_NEXT(msg_ptr, len)) {
 			/* Como listamos interfaces, buscamos todos los mensajes RTM_NEWLINK */
 			if (msg_ptr->nlmsg_type == RTM_NEWLINK) {
-				interfaces_add_or_update_rtnl_link (handle, msg_ptr);
+				interfaces_add_or_update_rtnl_link (handle, msg_ptr, 1);
 			}
 		}
 	}

@@ -39,6 +39,9 @@ typedef struct _Interface {
 	int ifi_type;
 	char real_hw[ETHER_ADDR_LEN * 2 + 1];
 	unsigned int index;
+	unsigned int master_index;
+	
+	unsigned int mtu;
 	
 	short flags;
 	

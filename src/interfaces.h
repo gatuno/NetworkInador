@@ -33,7 +33,7 @@ extern int global_nl_seq;
 
 void interfaces_list_all (NetworkInadorHandle *handle, int sock);
 Interface * interfaces_locate_by_index (Interface *list, int index);
-void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlmsghdr *h);
+void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlmsghdr *h, int first_time);
 void interfaces_del_rtnl_link (NetworkInadorHandle *handle, struct nlmsghdr *h);
 void interfaces_add_or_update_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr *h);
 void interfaces_del_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr *h);
