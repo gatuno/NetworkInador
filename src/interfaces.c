@@ -115,9 +115,9 @@ static IPv4 * _interfaces_serach_ipv4 (Interface *interface, struct in_addr addr
 static void _interfaces_list_ipv4_address (NetworkInadorHandle *handle, int sock) {
 	struct msghdr rtnl_msg;    /* generic msghdr struct for use with sendmsg */
 	struct iovec io;
-	nl_req_t req;
+	struct ifaddrmsg *ifa;
 	struct sockaddr_nl kernel;
-	char reply[8192]; /* a large buffer */
+	char buffer[8192]; /* a large buffer */
 	int len;
 	
 	/* Para la respuesta */
@@ -130,22 +130,25 @@ static void _interfaces_list_ipv4_address (NetworkInadorHandle *handle, int sock
 	local_size = sizeof (local_nl);
 	getsockname (sock, (struct sockaddr *) &local_nl, &local_size);
 	
-	memset(&rtnl_msg, 0, sizeof(rtnl_msg));
-	memset(&kernel, 0, sizeof(kernel));
-	memset(&req, 0, sizeof(req));
+	memset (&rtnl_msg, 0, sizeof (rtnl_msg));
+	memset (&kernel, 0, sizeof (kernel));
+	memset (buffer, 0, sizeof (buffer));
 
 	kernel.nl_family = AF_NETLINK; /* fill-in kernel address (destination of our message) */
 	kernel.nl_groups = 0;
 	
-	req.hdr.nlmsg_len = NLMSG_LENGTH(sizeof(struct rtgenmsg));
-	req.hdr.nlmsg_type = RTM_GETADDR;
-	req.hdr.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP; 
-	req.hdr.nlmsg_seq = global_nl_seq++;
-	req.hdr.nlmsg_pid = local_nl.nl_pid;
-	req.gen.rtgen_family = AF_INET;
+	msg_ptr = (struct nlmsghdr *) buffer;
+	msg_ptr->nlmsg_len = NLMSG_LENGTH (sizeof (struct ifaddrmsg));
+	msg_ptr->nlmsg_type = RTM_GETADDR;
+	msg_ptr->nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+	msg_ptr->nlmsg_seq = global_nl_seq++;
+	msg_ptr->nlmsg_pid = local_nl.nl_pid;
+	
+	ifa = (struct ifaddrmsg *) NLMSG_DATA (msg_ptr);
+	ifa->ifa_family = AF_INET;
 
-	io.iov_base = &req;
-	io.iov_len = req.hdr.nlmsg_len;
+	io.iov_base = buffer;
+	io.iov_len = msg_ptr->nlmsg_len;
 	rtnl_msg.msg_iov = &io;
 	rtnl_msg.msg_iovlen = 1;
 	rtnl_msg.msg_name = &kernel;
@@ -154,21 +157,22 @@ static void _interfaces_list_ipv4_address (NetworkInadorHandle *handle, int sock
 	sendmsg (sock, (struct msghdr *) &rtnl_msg, 0);
 	
 	/* Esperar la respuesta */
-	memset(&io, 0, sizeof(io));
-	memset(&rtnl_msg, 0, sizeof(rtnl_msg));
+	memset (&io, 0, sizeof (io));
+	memset (&rtnl_msg, 0, sizeof (rtnl_msg));
+	memset (buffer, 0, sizeof (buffer));
 	
-	io.iov_base = reply;
-	io.iov_len = sizeof (reply);
+	io.iov_base = buffer;
+	io.iov_len = sizeof (buffer);
 	rtnl_msg.msg_iov = &io;
 	rtnl_msg.msg_iovlen = 1;
 	rtnl_msg.msg_name = &kernel;
-	rtnl_msg.msg_namelen = sizeof(kernel);
+	rtnl_msg.msg_namelen = sizeof (kernel);
 
-	while ((len = recvmsg(sock, &rtnl_msg, 0)) > 0) { /* read lots of data */
-		msg_ptr = (struct nlmsghdr *) reply;
+	while ((len = recvmsg (sock, &rtnl_msg, 0)) > 0) { /* read lots of data */
+		msg_ptr = (struct nlmsghdr *) buffer;
 		if (msg_ptr->nlmsg_type == NLMSG_DONE) break;
 	
-		for (; NLMSG_OK(msg_ptr, len); msg_ptr = NLMSG_NEXT(msg_ptr, len)) {
+		for (; NLMSG_OK (msg_ptr, len); msg_ptr = NLMSG_NEXT (msg_ptr, len)) {
 			/* Procesar solo los mensajes de nueva interfaz */
 			printf ("Msg type: %i\n", msg_ptr->nlmsg_type);
 			if (msg_ptr->nlmsg_type == RTM_NEWADDR) {
@@ -264,8 +268,86 @@ void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlm
 					
 					printf ("Interface %d has mtu: %u\n", iface->ifi_index, new->mtu);
 				break;
-			//default:
-				//printf ("RTA Attribute \"%hu\" no procesado\n", attribute->rta_type);
+			case IFLA_OPERSTATE:
+				{
+					unsigned int operstate;
+					memcpy (&operstate, RTA_DATA (attribute), sizeof (operstate));
+				}
+				break;
+			case IFLA_AF_SPEC:
+				{
+					struct rtattr * sub_attr;
+					int sub_len;
+					int nla_len;
+					
+					sub_len = attribute->rta_len;
+					
+					sub_attr = RTA_DATA (attribute);
+					
+					while (sub_len > sizeof (sub_attr)) {
+						nla_len = sub_attr->rta_len;
+						
+						if (nla_len > sub_len) {
+							printf ("Los sub atributos se acabaron prematuramente\n");
+							break;
+						}
+						printf ("Interface %d, IFLA_AF_SPEC, sub attributo type: %i\n", iface->ifi_index, sub_attr->rta_type);
+						
+						sub_len -= RTA_ALIGN (nla_len);
+						sub_attr = (struct rtattr *) (((char *) sub_attr) + RTA_ALIGN (nla_len));
+					}
+				}
+				break;
+			case IFLA_LINKINFO:
+				{
+					struct rtattr * nest_attr;
+					int nest_size;
+					int sub_len;
+					
+					nest_size = attribute->rta_len;
+					nest_attr = RTA_DATA (attribute);
+					
+					while (nest_size > sizeof (nest_attr)) {
+						sub_len = nest_attr->rta_len;
+						
+						if (sub_len > nest_size) {
+							printf ("Los sub atributos se acabaron prematuramente\n");
+							break;
+						}
+						printf ("Interface %d, IFLA_LINKINFO, sub attributo type: %i\n", iface->ifi_index, nest_attr->rta_type);
+						
+						if (nest_attr->rta_type == IFLA_INFO_KIND) {
+							printf ("IFLA_INFO_KIND: %s\n", RTA_DATA (nest_attr));
+						} else if (nest_attr->rta_type == IFLA_INFO_DATA) {
+							printf ("Segunda anidación: IFLA_INFO_DATA: size: %d\n", nest_attr->rta_len);
+							struct rtattr *nest2_attr;
+							int nest2_size;
+							int sub2_len;
+							
+							nest2_size = nest_attr->rta_len;
+							nest2_attr = RTA_DATA (nest_attr);
+							
+							while (nest2_size > sizeof (nest2_attr)) {
+								sub2_len = nest2_attr->rta_len;
+								printf ("------ Nest2_attr->rta_len = %d. El tamaño es: %d\n", sub2_len, nest2_size);
+								if (sub2_len > nest2_size) {
+									printf ("Los sub atributos se acabaron prematuramente\n");
+									break;
+								}
+								printf ("Interface %d, IFLA_INFO_DATA, sub attributo type: %i, size: %d\n", iface->ifi_index, nest2_attr->rta_type, nest2_attr->rta_len);
+								
+								//if (
+								
+								nest2_size -= RTA_ALIGN (sub2_len);
+								nest2_attr = (struct rtattr *) (((char *) nest2_attr) + RTA_ALIGN (sub2_len));
+							}
+							
+						}
+						nest_size -= RTA_ALIGN (sub_len);
+						nest_attr = (struct rtattr *) (((char *) nest_attr) + RTA_ALIGN (sub_len));
+					}
+				}
+				break;
 		}
 	}
 }

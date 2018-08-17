@@ -46,11 +46,14 @@ enum {
 	
 	MANAGER_COMMAND_SET_IPV4,
 	
+	MANAGER_COMMAND_LIST_ROUTES,
+	
 	MANAGER_RESPONSE = 128,
 	MANAGER_RESPONSE_REQUEST_INVALID = 128,
 	MANAGER_RESPONSE_PROCESING,
 	MANAGER_RESPONSE_LIST_IFACES,
 	
+	MANAGER_RESPONSE_LIST_ROUTES,
 };
 
 #define MANAGER_IFACE_TYPE_WIRELESS 2
@@ -166,6 +169,43 @@ static void _manager_handle_interface_set_ipv4 (NetworkInadorHandle *handle, cha
 	_manager_send_processing (sock, client, socklen, seq);
 }
 
+static void _manager_send_list_routes (NetworkInadorHandle *handle, int sock, struct sockaddr_un *client, socklen_t socklen, int seq) {
+	unsigned char buffer[8192];
+	Routev4 *route_g;
+	int pos;
+	int flags;
+	unsigned int count;
+	
+	buffer[0] = MANAGER_RESPONSE_LIST_ROUTES;
+	buffer[1] = seq;
+	
+	route_g = handle->rtable_v4;
+	
+	count = 0;
+	pos = 6;
+	while (route_g != NULL) {
+		memcpy (&buffer[pos], &route_g->dest, sizeof (route_g->dest));
+		pos = pos + sizeof (route_g->dest);
+		
+		buffer[pos] = route_g->prefix;
+		buffer[pos + 1] = route_g->index;
+		buffer[pos + 2] = route_g->table;
+		buffer[pos + 3] = route_g->type;
+		pos = pos + 4;
+		
+		memcpy (&buffer[pos], &route_g->gateway, sizeof (route_g->gateway));
+		
+		pos = pos + 4;
+		
+		route_g = route_g->next;
+		count++;
+	}
+	
+	memcpy (&buffer[2], &count, sizeof (int));
+	
+	sendto (sock, buffer, pos, 0, (struct sockaddr *) client, socklen);
+}
+
 static gboolean _manager_client_data (GIOChannel *source, GIOCondition condition, gpointer data) {
 	NetworkInadorHandle *handle = (NetworkInadorHandle *) data;
 	int sock;
@@ -196,6 +236,11 @@ static gboolean _manager_client_data (GIOChannel *source, GIOCondition condition
 		case MANAGER_COMMAND_SET_IPV4:
 			_manager_handle_interface_set_ipv4 (handle, &buffer[2], len - 2, sock, &client_name, socklen, seq);
 			break;
+		case MANAGER_COMMAND_LIST_ROUTES:
+			_manager_send_list_routes (handle, sock, &client_name, socklen, seq);
+			break;
+		default:
+			_manager_send_invalid_request (sock, &client_name, socklen, seq);
 	}
 	
 	return TRUE;

@@ -1,8 +1,8 @@
 /*
- * rta_aux.h
+ * routes.h
  * This file is part of Network-inador
  *
- * Copyright (C) 2011 - Félix Arreola Rodríguez
+ * Copyright (C) 2018 - Félix Arreola Rodríguez
  *
  * Network-inador is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,15 +20,16 @@
  * Boston, MA  02110-1301  USA
  */
 
-#ifndef __RTA_AUX_H__
-#define __RTA_AUX_H__
+#ifndef __ROUTES_H__
+#define __ROUTES_H__
 
-#define for_each_rattr(n, buf, len)					\
-for (n = (struct rtattr*)buf; RTA_OK(n, len); n = RTA_NEXT(n, len))
+#include "network-inador.h"
 
-int rta_addattr_l (struct nlmsghdr *n, int maxlen, int type, const void *data, int alen);
-struct rtattr * rta_addattr_nest (struct nlmsghdr *n, int maxlen, int type);
-int rta_addattr_nest_end (struct nlmsghdr *n, struct rtattr *nest);
+void routes_list (NetworkInadorHandle *handle, int sock);
+void routes_add_or_update_rtm (NetworkInadorHandle *handle, struct nlmsghdr *h);
+void routes_del_rtm (NetworkInadorHandle *handle, struct nlmsghdr *h);
+void routes_manual_add_ipv4 (int sock, Interface *interface, IPv4 *dest, struct in_addr gateway);
+void routes_manual_del_v4 (int sock, Routev4 *route);
 
 #endif
 

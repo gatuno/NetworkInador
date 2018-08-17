@@ -23,6 +23,8 @@
 #ifndef __NETWORK_INADOR_H__
 #define __NETWORK_INADOR_H__
 
+#include <stdint.h>
+
 #include <netinet/in.h>
 #include <linux/if.h>
 #include <net/ethernet.h>
@@ -57,8 +59,23 @@ typedef struct _Interface {
 	struct _Interface *next;
 } Interface;
 
+typedef struct _Routev4 {
+	struct in_addr dest;
+	uint32_t prefix;
+	
+	struct in_addr gateway;
+	unsigned int index;
+	
+	unsigned char table;
+	unsigned char type;
+	
+	struct _Routev4 *next;
+} Routev4;
+
 typedef struct {
 	Interface *interfaces;
+	Routev4 *rtable_v4;
+	
 	int netlink_sock_request;
 } NetworkInadorHandle;
 

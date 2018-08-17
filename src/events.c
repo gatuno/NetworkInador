@@ -43,11 +43,12 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#include <glib.h>
+
 #include "events.h"
 #include "network-inador.h"
 #include "interfaces.h"
-
-#include <glib.h>
+#include "routes.h"
 
 static gboolean _events_handle_read (GIOChannel *source, GIOCondition condition, gpointer data) {
 	NetworkInadorHandle *handle = (NetworkInadorHandle *) data;
@@ -102,6 +103,12 @@ static gboolean _events_handle_read (GIOChannel *source, GIOCondition condition,
 		} else if (msg_ptr->nlmsg_type == RTM_DELADDR) {
 			printf ("Mensaje dinámico de eliminar IP\n");
 			interfaces_del_ipv4 (handle, msg_ptr);
+		} else if (msg_ptr->nlmsg_type == RTM_NEWROUTE) {
+			printf ("Mensaje dinámico de nueva ruta\n");
+			routes_add_or_update_rtm (handle, msg_ptr);
+		} else if (msg_ptr->nlmsg_type == RTM_DELROUTE) {
+			printf ("Mensaje dinámico de eliminar ruta\n");
+			routes_del_rtm (handle, msg_ptr);
 		}
 	}
 	

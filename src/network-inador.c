@@ -45,6 +45,7 @@
 #include "events.h"
 #include "manager.h"
 #include "bridge.h"
+#include "routes.h"
 
 static GMainLoop *loop = NULL;
 
@@ -86,6 +87,7 @@ int main (int argc, char *argv[]) {
 	loop = g_main_loop_new (NULL, FALSE);
 	
 	handle.interfaces = NULL;
+	handle.rtable_v4 = NULL;
 	
 	Interface *to_up;
 	
@@ -94,6 +96,8 @@ int main (int argc, char *argv[]) {
 	nl_watch = create_ntlink_socket (-1);
 	
 	interfaces_list_all (&handle, nl_sock);
+	
+	routes_list (&handle, nl_sock);
 	
 	events_setup_loop (&handle, nl_watch);
 	
