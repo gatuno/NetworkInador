@@ -56,9 +56,11 @@ enum {
 	MANAGER_RESPONSE_LIST_ROUTES,
 };
 
-#define MANAGER_IFACE_TYPE_WIRELESS 2
-#define MANAGER_IFACE_TYPE_BRIDGE 4
-#define MANAGER_IFACE_TYPE_LOOPBACK 8
+#define MANAGER_IFACE_TYPE_WIRELESS 0x02
+#define MANAGER_IFACE_TYPE_BRIDGE 0x04
+#define MANAGER_IFACE_TYPE_LOOPBACK 0x8
+#define MANAGER_IFACE_TYPE_VLAN 0x10
+#define MANAGER_IFACE_TYPE_NLMON 0x20
 
 static void _manager_send_invalid_request (int sock, struct sockaddr_un *client, socklen_t socklen, int seq) {
 	unsigned char buffer[128];
@@ -104,6 +106,14 @@ static void _manager_send_list_interfaces (NetworkInadorHandle *handle, int sock
 		
 		if (iface_g->is_bridge) {
 			flags |= MANAGER_IFACE_TYPE_BRIDGE;
+		}
+		
+		if (iface_g->is_vlan) {
+			flags |= MANAGER_IFACE_TYPE_VLAN;
+		}
+		
+		if (iface_g->is_nlmon) {
+			flags |= MANAGER_IFACE_TYPE_NLMON;
 		}
 		
 		buffer[pos + 1] = flags;

@@ -33,26 +33,33 @@ typedef struct _IPv4 {
 	struct in_addr sin_addr;
 	uint32_t prefix;
 	
+	unsigned char flags;
+	
 	struct _IPv4 *next;
 } IPv4;
 
 typedef struct _Interface {
 	char name[IFNAMSIZ];
 	int ifi_type;
-	char real_hw[ETHER_ADDR_LEN * 2 + 1];
+	unsigned char real_hw[ETHER_ADDR_LEN * 2 + 1];
 	unsigned int index;
+	
+	/* Para las interfaces dentro de un bridge */
 	unsigned int master_index;
 	
 	unsigned int mtu;
 	
+	/* Banderas estilo ioctl */
 	short flags;
 	
 	char wireless_protocol[IFNAMSIZ];
 	
+	/* Tipo */
 	int is_loopback;
 	int is_wireless;
 	int is_bridge;
 	int is_vlan;
+	int is_nlmon;
 	
 	IPv4 *v4_address;
 	

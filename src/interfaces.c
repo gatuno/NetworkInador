@@ -44,7 +44,7 @@
 #include "interfaces.h"
 
 Interface * interfaces_locate_by_index (Interface *list, int index);
-static void _interfaces_append_ipv4_to_struct (Interface *interface, struct in_addr address, uint32_t prefix);
+static IPv4 * _interfaces_append_ipv4_to_struct (Interface *interface, struct in_addr address, uint32_t prefix);
 
 int global_nl_seq = 1;
 
@@ -74,7 +74,7 @@ Interface * interfaces_locate_by_index (Interface *list, int index) {
 	return NULL;
 }
 
-static void _interfaces_append_ipv4_to_struct (Interface *interface, struct in_addr address, uint32_t prefix) {
+static IPv4 * _interfaces_append_ipv4_to_struct (Interface *interface, struct in_addr address, uint32_t prefix) {
 	IPv4 *new_addr, *last;
 	
 	new_addr = (IPv4 *) malloc (sizeof (IPv4));
@@ -95,6 +95,8 @@ static void _interfaces_append_ipv4_to_struct (Interface *interface, struct in_a
 		
 		last->next = new_addr;
 	}
+	
+	return new_addr;
 }
 
 static IPv4 * _interfaces_serach_ipv4 (Interface *interface, struct in_addr address, uint32_t prefix) {
@@ -191,12 +193,12 @@ void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlm
 	iface = NLMSG_DATA(h);
 	len = h->nlmsg_len - NLMSG_LENGTH (sizeof (struct ifinfomsg));
 	
-	printf ("Mensaje de nueva interfaz: %i\n", iface->ifi_index);
+	//printf ("Mensaje de nueva interfaz: %i\n", iface->ifi_index);
 	new = interfaces_locate_by_index (handle->interfaces, iface->ifi_index);
 	
 	/* Si el objeto interface no existe, crearlo y ligarlo en la lista de interfaces */
 	if (new == NULL) {
-		printf ("Creando...\n");
+		//printf ("Creando...\n");
 		new = malloc (sizeof (Interface));
 		memset (new, 0, sizeof (Interface));
 		new->next = NULL;
@@ -260,13 +262,13 @@ void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlm
 			case IFLA_MASTER:
 				if (first_time) {
 					memcpy (&new->master_index, RTA_DATA (attribute), 4);
-					printf ("Interface %d has master: %i\n", iface->ifi_index, new->master_index);
+					//printf ("Interface %d has master: %i\n", iface->ifi_index, new->master_index);
 				}
 				break;
 			case IFLA_MTU:
 					memcpy (&new->mtu, RTA_DATA (attribute), attribute->rta_len);
 					
-					printf ("Interface %d has mtu: %u\n", iface->ifi_index, new->mtu);
+					//printf ("Interface %d has mtu: %u\n", iface->ifi_index, new->mtu);
 				break;
 			case IFLA_OPERSTATE:
 				{
@@ -274,7 +276,7 @@ void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlm
 					memcpy (&operstate, RTA_DATA (attribute), sizeof (operstate));
 				}
 				break;
-			case IFLA_AF_SPEC:
+			/*case IFLA_AF_SPEC:
 				{
 					struct rtattr * sub_attr;
 					int sub_len;
@@ -297,7 +299,7 @@ void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlm
 						sub_attr = (struct rtattr *) (((char *) sub_attr) + RTA_ALIGN (nla_len));
 					}
 				}
-				break;
+				break;*/
 			case IFLA_LINKINFO:
 				{
 					struct rtattr * nest_attr;
@@ -311,38 +313,22 @@ void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlm
 						sub_len = nest_attr->rta_len;
 						
 						if (sub_len > nest_size) {
-							printf ("Los sub atributos se acabaron prematuramente\n");
+							//printf ("Los sub atributos se acabaron prematuramente\n");
 							break;
 						}
-						printf ("Interface %d, IFLA_LINKINFO, sub attributo type: %i\n", iface->ifi_index, nest_attr->rta_type);
+						//printf ("Interface %d, IFLA_LINKINFO, sub attributo type: %i\n", iface->ifi_index, nest_attr->rta_type);
 						
 						if (nest_attr->rta_type == IFLA_INFO_KIND) {
 							printf ("IFLA_INFO_KIND: %s\n", RTA_DATA (nest_attr));
-						} else if (nest_attr->rta_type == IFLA_INFO_DATA) {
-							printf ("Segunda anidación: IFLA_INFO_DATA: size: %d\n", nest_attr->rta_len);
-							struct rtattr *nest2_attr;
-							int nest2_size;
-							int sub2_len;
-							
-							nest2_size = nest_attr->rta_len;
-							nest2_attr = RTA_DATA (nest_attr);
-							
-							while (nest2_size > sizeof (nest2_attr)) {
-								sub2_len = nest2_attr->rta_len;
-								printf ("------ Nest2_attr->rta_len = %d. El tamaño es: %d\n", sub2_len, nest2_size);
-								if (sub2_len > nest2_size) {
-									printf ("Los sub atributos se acabaron prematuramente\n");
-									break;
-								}
-								printf ("Interface %d, IFLA_INFO_DATA, sub attributo type: %i, size: %d\n", iface->ifi_index, nest2_attr->rta_type, nest2_attr->rta_len);
-								
-								//if (
-								
-								nest2_size -= RTA_ALIGN (sub2_len);
-								nest2_attr = (struct rtattr *) (((char *) nest2_attr) + RTA_ALIGN (sub2_len));
+							if (strcmp (RTA_DATA (nest_attr), "vlan") == 0) {
+								new->is_vlan = 1;
+							} else if (strcmp (RTA_DATA (nest_attr), "nlmon") == 0) {
+								new->is_nlmon = 1;
+							} else if (strcmp (RTA_DATA (nest_attr), "bridge") == 0) {
+								new->is_bridge = 1;
 							}
-							
 						}
+						
 						nest_size -= RTA_ALIGN (sub_len);
 						nest_attr = (struct rtattr *) (((char *) nest_attr) + RTA_ALIGN (sub_len));
 					}
@@ -462,8 +448,11 @@ void interfaces_add_or_update_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr
 	
 	if (new == NULL) {
 		printf ("Agregando IP a la lista de IP's\n");
-		_interfaces_append_ipv4_to_struct (iface, ip, prefix);
+		new = _interfaces_append_ipv4_to_struct (iface, ip, prefix);
 	}
+	
+	new->flags = addr->ifa_flags;
+	
 }
 
 void interfaces_del_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr *h) {
