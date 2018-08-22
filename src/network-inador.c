@@ -49,11 +49,11 @@
 
 static GMainLoop *loop = NULL;
 
-int create_ntlink_socket (int groups) {
+int create_route_netlink_socket (int groups) {
 	int fd;
 	struct sockaddr_nl local;
 	
-	fd = socket (AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
+	fd = socket (AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE);
 	
 	if (fd < 0) {
 		return -1;

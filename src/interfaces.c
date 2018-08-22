@@ -53,12 +53,6 @@ typedef struct {
 	struct rtgenmsg gen;
 } nl_req_t;
 
-typedef struct {
-	struct nlmsghdr hdr;
-	struct ifinfomsg i;
-	char buf[1024];
-} nl_req_if;
-
 Interface * interfaces_locate_by_index (Interface *list, int index) {
 	Interface *iface;
 	
@@ -99,7 +93,7 @@ static IPv4 * _interfaces_append_ipv4_to_struct (Interface *interface, struct in
 	return new_addr;
 }
 
-static IPv4 * _interfaces_serach_ipv4 (Interface *interface, struct in_addr address, uint32_t prefix) {
+IPv4 * _interfaces_serach_ipv4 (Interface *interface, struct in_addr address, uint32_t prefix) {
 	IPv4 *list;
 	
 	list = interface->v4_address;
@@ -452,7 +446,6 @@ void interfaces_add_or_update_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr
 	}
 	
 	new->flags = addr->ifa_flags;
-	
 }
 
 void interfaces_del_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr *h) {
@@ -476,6 +469,7 @@ void interfaces_del_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr *h) {
 	}
 	
 	printf ("IP eliminada para la interfaz: %d, de la familia: %d\n", addr->ifa_index, addr->ifa_family);
+	
 	size_t len = IFA_PAYLOAD (h);
 	
 	for (attribute = IFA_RTA (addr); RTA_OK (attribute, len); attribute = RTA_NEXT (attribute, len)) {
@@ -715,12 +709,12 @@ void interfaces_manual_add_ipv4 (int sock, Interface *interface, IPv4 *address) 
 void interfaces_bring_up (int sock, Interface *interface) {
 	struct msghdr rtnl_msg;
 	struct iovec io;
-	nl_req_if req;
 	struct sockaddr_nl kernel;
-	char reply[8192];
+	char buffer[8192];
 	int len;
 	
 	struct nlmsghdr *nl;
+	struct ifinfomsg *ifi;
 	struct nlmsgerr *l_err;
 	
 	struct sockaddr_nl local_nl;
@@ -730,30 +724,32 @@ void interfaces_bring_up (int sock, Interface *interface) {
 	local_size = sizeof (local_nl);
 	getsockname (sock, (struct sockaddr *) &local_nl, &local_size);
 	
-	memset(&rtnl_msg, 0, sizeof(rtnl_msg));
-	memset(&kernel, 0, sizeof(kernel));
-	memset(&req, 0, sizeof(req));
+	memset (&rtnl_msg, 0, sizeof (rtnl_msg));
+	memset (&kernel, 0, sizeof (kernel));
+	memset (buffer, 0, sizeof (buffer));
 	
 	kernel.nl_family = AF_NETLINK; /* fill-in kernel address (destination of our message) */
 	kernel.nl_groups = 0;
 	
-	req.hdr.nlmsg_len = NLMSG_LENGTH(sizeof(struct ifinfomsg));
-	req.hdr.nlmsg_type = RTM_NEWLINK;
-	req.hdr.nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
-	req.hdr.nlmsg_seq = global_nl_seq++;
-	req.hdr.nlmsg_pid = local_nl.nl_pid;
+	nl = (struct nlmsghdr *) buffer;
+	nl->nlmsg_len = NLMSG_LENGTH (sizeof (struct ifinfomsg));
+	nl->nlmsg_type = RTM_NEWLINK;
+	nl->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
+	nl->nlmsg_seq = global_nl_seq++;
+	nl->nlmsg_pid = local_nl.nl_pid;
 	
-	req.i.ifi_family = AF_PACKET;
-	req.i.ifi_index = interface->index;
-	req.i.ifi_change |= IFF_UP;
-	req.i.ifi_flags |= IFF_UP;
+	ifi = (struct ifinfomsg*) NLMSG_DATA (nl);
+	ifi->ifi_family = AF_PACKET;
+	ifi->ifi_index = interface->index;
+	ifi->ifi_change |= IFF_UP;
+	ifi->ifi_flags |= IFF_UP;
 	
-	io.iov_base = &req;
-	io.iov_len = req.hdr.nlmsg_len;
+	io.iov_base = buffer;
+	io.iov_len = nl->nlmsg_len;
 	rtnl_msg.msg_iov = &io;
 	rtnl_msg.msg_iovlen = 1;
 	rtnl_msg.msg_name = &kernel;
-	rtnl_msg.msg_namelen = sizeof(kernel);
+	rtnl_msg.msg_namelen = sizeof (kernel);
 	
 	len = sendmsg (sock, (struct msghdr *) &rtnl_msg, 0);
 	
@@ -761,15 +757,15 @@ void interfaces_bring_up (int sock, Interface *interface) {
 	memset (&io, 0, sizeof (io));
 	memset (&rtnl_msg, 0, sizeof (rtnl_msg));
 	
-	io.iov_base = reply;
-	io.iov_len = sizeof (reply);
+	io.iov_base = buffer;
+	io.iov_len = sizeof (buffer);
 	rtnl_msg.msg_iov = &io;
 	rtnl_msg.msg_iovlen = 1;
 	rtnl_msg.msg_name = &kernel;
 	rtnl_msg.msg_namelen = sizeof (kernel);
 	
 	len = recvmsg (sock, &rtnl_msg, 0);
-	nl = (struct nlmsghdr *) reply;
+	nl = (struct nlmsghdr *) buffer;
 	for (; NLMSG_OK(nl, len); nl = NLMSG_NEXT(nl, len)) {
 		if (nl->nlmsg_type == NLMSG_DONE) {
 			printf ("Bring UP Msg type: DONE!\n");
@@ -782,6 +778,83 @@ void interfaces_bring_up (int sock, Interface *interface) {
 			} else if (l_err->error != 0) {
 				// Error:
 				printf ("Bring up Error: %i\n", l_err->error);
+			}
+			break;
+		}
+	}
+}
+
+void interfaces_bring_down (int sock, Interface *interface) {
+	struct msghdr rtnl_msg;
+	struct iovec io;
+	struct sockaddr_nl kernel;
+	char buffer[8192];
+	int len;
+	
+	struct nlmsghdr *nl;
+	struct ifinfomsg *ifi;
+	struct nlmsgerr *l_err;
+	
+	struct sockaddr_nl local_nl;
+	socklen_t local_size;
+	
+	/* Recuperar el puerto local del netlink */
+	local_size = sizeof (local_nl);
+	getsockname (sock, (struct sockaddr *) &local_nl, &local_size);
+	
+	memset (&rtnl_msg, 0, sizeof (rtnl_msg));
+	memset (&kernel, 0, sizeof (kernel));
+	memset (buffer, 0, sizeof (buffer));
+	
+	kernel.nl_family = AF_NETLINK; /* fill-in kernel address (destination of our message) */
+	kernel.nl_groups = 0;
+	
+	nl = (struct nlmsghdr *) buffer;
+	nl->nlmsg_len = NLMSG_LENGTH (sizeof (struct ifinfomsg));
+	nl->nlmsg_type = RTM_NEWLINK;
+	nl->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
+	nl->nlmsg_seq = global_nl_seq++;
+	nl->nlmsg_pid = local_nl.nl_pid;
+	
+	ifi = (struct ifinfomsg*) NLMSG_DATA (nl);
+	ifi->ifi_family = AF_PACKET;
+	ifi->ifi_index = interface->index;
+	ifi->ifi_change |= IFF_UP;
+	
+	io.iov_base = buffer;
+	io.iov_len = nl->nlmsg_len;
+	rtnl_msg.msg_iov = &io;
+	rtnl_msg.msg_iovlen = 1;
+	rtnl_msg.msg_name = &kernel;
+	rtnl_msg.msg_namelen = sizeof (kernel);
+	
+	len = sendmsg (sock, (struct msghdr *) &rtnl_msg, 0);
+	
+	/* Esperar la respuesta */
+	memset (&io, 0, sizeof (io));
+	memset (&rtnl_msg, 0, sizeof (rtnl_msg));
+	
+	io.iov_base = buffer;
+	io.iov_len = sizeof (buffer);
+	rtnl_msg.msg_iov = &io;
+	rtnl_msg.msg_iovlen = 1;
+	rtnl_msg.msg_name = &kernel;
+	rtnl_msg.msg_namelen = sizeof (kernel);
+	
+	len = recvmsg (sock, &rtnl_msg, 0);
+	nl = (struct nlmsghdr *) buffer;
+	for (; NLMSG_OK(nl, len); nl = NLMSG_NEXT(nl, len)) {
+		if (nl->nlmsg_type == NLMSG_DONE) {
+			printf ("Bring DOWN Msg type: DONE!\n");
+			break;
+		}
+		if (nl->nlmsg_type == NLMSG_ERROR) {
+			l_err = (struct nlmsgerr*) NLMSG_DATA (nl);
+			if (nl->nlmsg_len < NLMSG_LENGTH (sizeof (struct nlmsgerr))) {
+				printf ("Bring down Error tamaño truncado\n");
+			} else if (l_err->error != 0) {
+				// Error:
+				printf ("Bring down Error: %i\n", l_err->error);
 			}
 			break;
 		}

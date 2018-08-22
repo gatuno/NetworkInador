@@ -38,9 +38,13 @@ void interfaces_del_rtnl_link (NetworkInadorHandle *handle, struct nlmsghdr *h);
 void interfaces_add_or_update_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr *h);
 void interfaces_del_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr *h);
 
+IPv4 * _interfaces_serach_ipv4 (Interface *interface, struct in_addr address, uint32_t prefix);
+
 void interfaces_clear_all_ipv4_address (NetworkInadorHandle *handle, Interface *interface);
 void interfaces_manual_add_ipv4 (int sock, Interface *interface, IPv4 *address);
+void interfaces_manual_del_ipv4 (int sock, Interface *interface, IPv4 *address);
 void interfaces_bring_up (int sock, Interface *interface);
+void interfaces_bring_down (int sock, Interface *interface);
 
 #endif
 

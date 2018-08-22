@@ -32,6 +32,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
+#include <linux/if_addr.h>
 #include <sys/stat.h>
 
 #include "manager.h"
@@ -44,16 +45,44 @@ enum {
 	MANAGER_COMMAND_REQUEST = 0,
 	MANAGER_COMMAND_LIST_IFACES = 0,
 	
-	MANAGER_COMMAND_SET_IPV4,
+	MANAGER_COMMAND_BRING_UP_IFACE,
+	MANAGER_COMMAND_BRING_DOWN_IFACE,
+	
+	MANAGER_COMMAND_CLEAR_IPV4,
+	MANAGER_COMMAND_ADD_IPV4,
+	MANAGER_COMMAND_REMOVE_IPV4,
+	
+	MANAGER_COMMAND_LIST_IPV4,
+	
+	MANAGER_COMMAND_RUN_DHCP_CLIENT,
 	
 	MANAGER_COMMAND_LIST_ROUTES,
 	
+	MANAGER_COMMAND_ADD_ROUTE_V4,
+	MANAGER_COMMAND_REMOVE_ROUTE_V4,
+	
 	MANAGER_RESPONSE = 128,
 	MANAGER_RESPONSE_REQUEST_INVALID = 128,
-	MANAGER_RESPONSE_PROCESING,
+	
+	MANAGER_RESPONSE_PROCESSING,
+	
 	MANAGER_RESPONSE_LIST_IFACES,
 	
+	MANAGER_RESPONSE_LIST_IPV4,
+	
 	MANAGER_RESPONSE_LIST_ROUTES,
+};
+
+enum {
+	MANAGER_ERROR_UNKNOWN = 0,
+	
+	MANAGER_ERROR_INCOMPLETE_REQUEST,
+	
+	MANAGER_ERROR_UNKNOWN_COMMAND,
+	
+	MANAGER_ERROR_PREFIX_INVALID,
+	MANAGER_ERROR_IFACE_INVALID,
+	MANAGER_ERROR_IPV4_INVALID
 };
 
 #define MANAGER_IFACE_TYPE_WIRELESS 0x02
@@ -62,32 +91,54 @@ enum {
 #define MANAGER_IFACE_TYPE_VLAN 0x10
 #define MANAGER_IFACE_TYPE_NLMON 0x20
 
-static void _manager_send_invalid_request (int sock, struct sockaddr_un *client, socklen_t socklen, int seq) {
+#define MANAGER_IFACE_IPV4_ADDRESS_SECONDARY 0x01
+
+typedef struct {
+	int sock;
+	struct sockaddr_un client;
+	socklen_t socklen;
+	
+	int seq;
+	
+	int command;
+	unsigned char *full_buffer;
+	unsigned char *command_data;
+	
+	int full_len;
+	int command_len;
+	
+} ManagerCommandRequest;
+
+static void _manager_send_invalid_request (ManagerCommandRequest *request, int error) {
 	unsigned char buffer[128];
 	
 	buffer[0] = MANAGER_RESPONSE_REQUEST_INVALID;
-	buffer[1] = seq;
+	buffer[1] = request->seq;
 	
-	sendto (sock, buffer, 2, 0, (struct sockaddr *) client, socklen);
+	sendto (request->sock, buffer, 2, 0, (struct sockaddr *) &request->client, request->socklen);
 }
 
-static void _manager_send_processing (int sock, struct sockaddr_un *client, socklen_t socklen, int seq) {
+static void _manager_send_processing (ManagerCommandRequest *request) {
 	unsigned char buffer[128];
 	
-	buffer[0] = MANAGER_RESPONSE_PROCESING;
-	buffer[1] = seq;
+	buffer[0] = MANAGER_RESPONSE_PROCESSING;
+	buffer[1] = request->seq;
 	
-	sendto (sock, buffer, 2, 0, (struct sockaddr *) client, socklen);
+	sendto (request->sock, buffer, 2, 0, (struct sockaddr *) &request->client, request->socklen);
 }
 
-static void _manager_send_list_interfaces (NetworkInadorHandle *handle, int sock, struct sockaddr_un *client, socklen_t socklen, int seq) {
+static void _manager_send_response (ManagerCommandRequest *request, unsigned char *buffer, int len) {
+	sendto (request->sock, buffer, len, 0, (struct sockaddr *) &request->client, request->socklen);
+}
+
+static void _manager_send_list_interfaces (NetworkInadorHandle *handle, ManagerCommandRequest *request) {
 	unsigned char buffer[8192];
 	Interface *iface_g;
 	int pos;
 	int flags;
 	
 	buffer[0] = MANAGER_RESPONSE_LIST_IFACES;
-	buffer[1] = seq;
+	buffer[1] = request->seq;
 	
 	iface_g = handle->interfaces;
 	
@@ -131,10 +182,113 @@ static void _manager_send_list_interfaces (NetworkInadorHandle *handle, int sock
 	buffer[pos] = 0;
 	pos++;
 	
-	sendto (sock, buffer, pos, 0, (struct sockaddr *) client, socklen);
+	_manager_send_response (request, buffer, pos);
 }
 
-static void _manager_handle_interface_set_ipv4 (NetworkInadorHandle *handle, char *buffer_read, int len, int sock, struct sockaddr_un *client, socklen_t socklen, int seq) {
+static void _manager_handle_clear_iface (NetworkInadorHandle *handle, ManagerCommandRequest *request) {
+	/* Primero, validar que haya suficientes bytes:
+	 * 1 byte de la interfaz
+	 */
+	
+	int index;
+	Interface *iface;
+	
+	if (request->command_len < 1) {
+		/* Bytes unsuficientes */
+		_manager_send_invalid_request (request, MANAGER_ERROR_INCOMPLETE_REQUEST);
+		return;
+	}
+	
+	index = request->command_data[0];
+	
+	iface = interfaces_locate_by_index (handle->interfaces, index);
+	
+	if (iface == NULL) {
+		_manager_send_invalid_request (request, MANAGER_ERROR_IFACE_INVALID);
+		return;
+	}
+	
+	interfaces_clear_all_ipv4_address (handle, iface);
+	
+	_manager_send_processing (request);
+}
+
+static void _manager_handle_bring_up_down_iface (NetworkInadorHandle *handle, ManagerCommandRequest *request) {
+	/* Primero, validar que haya suficientes bytes:
+	 * 1 byte de la interfaz
+	 */
+	
+	int index;
+	Interface *iface;
+	
+	if (request->command_len < 1) {
+		/* Bytes unsuficientes */
+		_manager_send_invalid_request (request, MANAGER_ERROR_INCOMPLETE_REQUEST);
+		return;
+	}
+	
+	index = request->command_data[0];
+	
+	iface = interfaces_locate_by_index (handle->interfaces, index);
+	
+	if (iface == NULL) {
+		_manager_send_invalid_request (request, MANAGER_ERROR_IFACE_INVALID);
+		return;
+	}
+	
+	if (request->command == MANAGER_COMMAND_BRING_UP_IFACE) {
+		interfaces_bring_up (handle->netlink_sock_request, iface);
+	} else {
+		interfaces_bring_down (handle->netlink_sock_request, iface);
+	}
+	
+	_manager_send_processing (request);
+}
+
+static void _manager_handle_interface_add_ipv4 (NetworkInadorHandle *handle, ManagerCommandRequest *request) {
+	/* Primero, validar que haya suficientes bytes:
+	 * 1 byte de la interfaz
+	 * 4 bytes de la dirección
+	 * 1 byte del prefix
+	 */
+	uint32_t prefix;
+	int index;
+	Interface *iface;
+	IPv4 address;
+	
+	if (request->command_len < 6) {
+		/* Bytes insuficientes */
+		_manager_send_invalid_request (request, MANAGER_ERROR_INCOMPLETE_REQUEST);
+		
+		return;
+	}
+	
+	prefix = request->command_data[5];
+	
+	if (prefix < 0 || prefix > 32) {
+		_manager_send_invalid_request (request, MANAGER_ERROR_PREFIX_INVALID);
+		return;
+	}
+	
+	index = request->command_data[0];
+	
+	iface = interfaces_locate_by_index (handle->interfaces, index);
+	
+	if (iface == NULL) {
+		_manager_send_invalid_request (request, MANAGER_ERROR_IFACE_INVALID);
+		return;
+	}
+	
+	memcpy (&address.sin_addr, &request->command_data[1], sizeof (struct in_addr));
+	address.prefix = prefix;
+	address.next = NULL;
+	
+	interfaces_manual_add_ipv4 (handle->netlink_sock_request, iface, &address);
+	
+	_manager_send_processing (request);
+}
+
+static void _manager_handle_interface_del_ipv4 (NetworkInadorHandle *handle, ManagerCommandRequest *request) {
 	/* Primero, validar que haya suficientes bytes:
 	 * 1 byte de la interfaz
 	 * 4 bytes de la dirección
@@ -144,42 +298,104 @@ static void _manager_handle_interface_set_ipv4 (NetworkInadorHandle *handle, cha
 	struct in_addr sin_addr;
 	int index;
 	Interface *iface;
-	IPv4 address;
+	IPv4 *to_del;
 	
-	if (len < 6) {
-		/* Bytes unsuficientes */
-		_manager_send_invalid_request (sock, client, socklen, seq);
+	if (request->command_len < 6) {
+		/* Bytes insuficientes */
+		_manager_send_invalid_request (request, MANAGER_ERROR_INCOMPLETE_REQUEST);
 		
 		return;
 	}
 	
-	prefix = buffer_read[5];
+	prefix = request->command_data[5];
 	
 	if (prefix < 0 || prefix > 32) {
-		_manager_send_invalid_request (sock, client, socklen, seq);
+		_manager_send_invalid_request (request, MANAGER_ERROR_PREFIX_INVALID);
 		return;
 	}
 	
-	index = buffer_read[0];
+	index = request->command_data[0];
 	
 	iface = interfaces_locate_by_index (handle->interfaces, index);
 	
 	if (iface == NULL) {
-		_manager_send_invalid_request (sock, client, socklen, seq);
+		_manager_send_invalid_request (request, MANAGER_ERROR_IFACE_INVALID);
 		return;
 	}
 	
-	memcpy (&address.sin_addr, &buffer_read[1], sizeof (struct in_addr));
-	address.prefix = prefix;
-	address.next = NULL;
+	memcpy (&sin_addr, &request->command_data[1], sizeof (struct in_addr));
 	
-	interfaces_clear_all_ipv4_address (handle, iface);
-	interfaces_manual_add_ipv4 (handle->netlink_sock_request, iface, &address);
+	to_del = _interfaces_serach_ipv4 (iface, sin_addr, prefix);
 	
-	_manager_send_processing (sock, client, socklen, seq);
+	if (to_del == NULL) {
+		_manager_send_invalid_request (request, MANAGER_ERROR_IPV4_INVALID);
+		return;
+	}
+	
+	interfaces_manual_del_ipv4 (handle->netlink_sock_request, iface, to_del);
+	
+	_manager_send_processing (request);
 }
 
-static void _manager_send_list_routes (NetworkInadorHandle *handle, int sock, struct sockaddr_un *client, socklen_t socklen, int seq) {
+static void _manager_send_list_ipv4 (NetworkInadorHandle *handle, ManagerCommandRequest *request) {
+	/* Primero, validar que haya suficientes bytes:
+	 * 1 byte de la interfaz
+	 */
+	
+	int index;
+	Interface *iface;
+	unsigned char buffer[8192];
+	IPv4 *ip_g;
+	int pos;
+	int count;
+	
+	if (request->command_len < 1) {
+		/* Bytes unsuficientes */
+		_manager_send_invalid_request (request, MANAGER_ERROR_INCOMPLETE_REQUEST);
+		return;
+	}
+	
+	index = request->command_data[0];
+	
+	iface = interfaces_locate_by_index (handle->interfaces, index);
+	
+	if (iface == NULL) {
+		_manager_send_invalid_request (request, MANAGER_ERROR_IFACE_INVALID);
+		return;
+	}
+	
+	buffer[0] = MANAGER_RESPONSE_LIST_IPV4;
+	buffer[1] = request->seq;
+	
+	ip_g = iface->v4_address;
+	
+	count = 0;
+	pos = 6;
+	
+	while (ip_g != NULL) {
+		memcpy (&buffer[pos], &ip_g->sin_addr, sizeof (ip_g->sin_addr));
+		pos = pos + sizeof (ip_g->sin_addr);
+		
+		buffer[pos] = ip_g->prefix;
+		
+		buffer[pos + 1] = 0;
+		
+		if (ip_g->flags & IFA_F_SECONDARY) {
+			buffer[pos + 1] |= MANAGER_IFACE_IPV4_ADDRESS_SECONDARY;
+		}
+		
+		pos = pos + 2;
+		
+		ip_g = ip_g->next;
+		count++;
+	}
+	
+	memcpy (&buffer[2], &count, sizeof (int));
+	
+	_manager_send_response (request, buffer, pos);
+}
+
+static void _manager_send_list_routes (NetworkInadorHandle *handle, ManagerCommandRequest *request) {
 	unsigned char buffer[8192];
 	Routev4 *route_g;
 	int pos;
@@ -187,7 +403,7 @@ static void _manager_send_list_routes (NetworkInadorHandle *handle, int sock, st
 	unsigned int count;
 	
 	buffer[0] = MANAGER_RESPONSE_LIST_ROUTES;
-	buffer[1] = seq;
+	buffer[1] = request->seq;
 	
 	route_g = handle->rtable_v4;
 	
@@ -213,44 +429,61 @@ static void _manager_send_list_routes (NetworkInadorHandle *handle, int sock, st
 	
 	memcpy (&buffer[2], &count, sizeof (int));
 	
-	sendto (sock, buffer, pos, 0, (struct sockaddr *) client, socklen);
+	_manager_send_response (request, buffer, pos);
 }
 
 static gboolean _manager_client_data (GIOChannel *source, GIOCondition condition, gpointer data) {
 	NetworkInadorHandle *handle = (NetworkInadorHandle *) data;
-	int sock;
 	unsigned char buffer[4096];
-	struct sockaddr_un client_name;
-	socklen_t socklen;
-	int len;
-	int seq;
+	ManagerCommandRequest request;
 	
-	sock = g_io_channel_unix_get_fd (source);
+	request.full_buffer = buffer;
 	
-	socklen = sizeof (client_name);
-	len = recvfrom (sock, buffer, sizeof (buffer), 0, (struct sockaddr *) &client_name, &socklen);
+	request.sock = g_io_channel_unix_get_fd (source);
+	
+	request.socklen = sizeof (request.client);
+	request.full_len = recvfrom (request.sock, buffer, sizeof (buffer), 0, (struct sockaddr *) &request.client, &request.socklen);
+	
+	request.command_data = &buffer[2];
+	request.command_len = request.full_len - 2;
+	
+	request.seq = 0;
 	
 	/* Procesar aquí la petición */
-	if (len < 2) {
-		_manager_send_invalid_request (sock, &client_name, socklen, 0);
+	if (request.full_len < 2) {
+		_manager_send_invalid_request (&request, MANAGER_ERROR_INCOMPLETE_REQUEST);
 		
 		return TRUE;
 	}
 	
-	seq = buffer[1];
+	request.command = buffer[0];
+	request.seq = buffer[1];
 	
-	switch (buffer[0]) {
+	switch (request.command) {
 		case MANAGER_COMMAND_LIST_IFACES:
-			_manager_send_list_interfaces (handle, sock, &client_name, socklen, seq);
+			_manager_send_list_interfaces (handle, &request);
 			break;
-		case MANAGER_COMMAND_SET_IPV4:
-			_manager_handle_interface_set_ipv4 (handle, &buffer[2], len - 2, sock, &client_name, socklen, seq);
+		case MANAGER_COMMAND_BRING_UP_IFACE:
+		case MANAGER_COMMAND_BRING_DOWN_IFACE:
+			_manager_handle_bring_up_down_iface (handle, &request);
+			break;
+		case MANAGER_COMMAND_CLEAR_IPV4:
+			_manager_handle_clear_iface (handle, &request);
+			break;
+		case MANAGER_COMMAND_ADD_IPV4:
+			_manager_handle_interface_add_ipv4 (handle, &request);
+			break;
+		case MANAGER_COMMAND_REMOVE_IPV4:
+			_manager_handle_interface_del_ipv4 (handle, &request);
+			break;
+		case MANAGER_COMMAND_LIST_IPV4:
+			_manager_send_list_ipv4 (handle, &request);
 			break;
 		case MANAGER_COMMAND_LIST_ROUTES:
-			_manager_send_list_routes (handle, sock, &client_name, socklen, seq);
+			_manager_send_list_routes (handle, &request);
 			break;
 		default:
-			_manager_send_invalid_request (sock, &client_name, socklen, seq);
+			_manager_send_invalid_request (&request, MANAGER_ERROR_UNKNOWN_COMMAND);
 	}
 	
 	return TRUE;
@@ -262,7 +495,7 @@ int manager_setup_socket (NetworkInadorHandle *handle) {
 	struct sockaddr_un socket_name;
 	GIOChannel *channel;
 	
-	sock = socket (AF_UNIX, SOCK_DGRAM, 0);
+	sock = socket (AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
 	
 	if (sock < 0) {
 		perror ("Failed to create AF_UNIX socket");
