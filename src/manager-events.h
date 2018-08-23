@@ -1,5 +1,5 @@
 /*
- * bridge.h
+ * manager-events.h
  * This file is part of Network-inador
  *
  * Copyright (C) 2018 - Félix Arreola Rodríguez
@@ -20,14 +20,18 @@
  * Boston, MA  02110-1301  USA
  */
 
-#ifndef __BRIDGE_H__
-#define __BRIDGE_H__
+#ifndef __MANAGER_EVENTS_H__
+#define __MANAGER_EVENTS_H__
 
 #include "network-inador.h"
 
-void bridge_create (int sock, const char *name);
-void bridge_add_interface (int sock, Interface *bridge, Interface *slave);
-void bridge_remove_slave_from_bridge (int sock, Interface *slave);
+enum {
+	MANAGER_EVENT_IPV4_ADDED = 1,
+	MANAGER_EVENT_IPV4_REMOVED,
+};
+
+void manager_events_notify_ipv4_address_added (Interface *iface, IPv4 *address);
+void manager_events_setup (NetworkInadorHandle *handle);
 
 #endif
 

@@ -1,5 +1,5 @@
 /*
- * bridge.h
+ * netlink-events.h
  * This file is part of Network-inador
  *
  * Copyright (C) 2018 - Félix Arreola Rodríguez
@@ -20,14 +20,12 @@
  * Boston, MA  02110-1301  USA
  */
 
-#ifndef __BRIDGE_H__
-#define __BRIDGE_H__
+#ifndef __NETLINK_EVENTS_H__
+#define __NETLINK_EVENTS_H__
 
 #include "network-inador.h"
 
-void bridge_create (int sock, const char *name);
-void bridge_add_interface (int sock, Interface *bridge, Interface *slave);
-void bridge_remove_slave_from_bridge (int sock, Interface *slave);
+void netlink_events_setup_loop (NetworkInadorHandle *handle, int sock);
 
 #endif
 

@@ -39,11 +39,13 @@
 #include "interfaces.h"
 #include "network-inador.h"
 
-#define SOCKET_PATH "/tmp/network-inador.socket"
+#define COMMAND_SOCKET_PATH "/tmp/network-inador.socket"
 
 enum {
-	MANAGER_COMMAND_REQUEST = 0,
-	MANAGER_COMMAND_LIST_IFACES = 0,
+	MANAGER_EVENT = 0,
+	
+	MANAGER_COMMAND_REQUEST = 1,
+	MANAGER_COMMAND_LIST_IFACES = 1,
 	
 	MANAGER_COMMAND_BRING_UP_IFACE,
 	MANAGER_COMMAND_BRING_DOWN_IFACE,
@@ -55,6 +57,7 @@ enum {
 	MANAGER_COMMAND_LIST_IPV4,
 	
 	MANAGER_COMMAND_RUN_DHCP_CLIENT,
+	MANAGER_COMMAND_STOP_DHCP_CLIENT,
 	
 	MANAGER_COMMAND_LIST_ROUTES,
 	
@@ -476,6 +479,12 @@ static gboolean _manager_client_data (GIOChannel *source, GIOCondition condition
 		case MANAGER_COMMAND_REMOVE_IPV4:
 			_manager_handle_interface_del_ipv4 (handle, &request);
 			break;
+		case MANAGER_COMMAND_RUN_DHCP_CLIENT:
+			
+			break;
+		case MANAGER_COMMAND_STOP_DHCP_CLIENT:
+			
+			break;
 		case MANAGER_COMMAND_LIST_IPV4:
 			_manager_send_list_ipv4 (handle, &request);
 			break;
@@ -506,9 +515,9 @@ int manager_setup_socket (NetworkInadorHandle *handle) {
 	memset (&socket_name, 0, sizeof (struct sockaddr_un));
 	
 	socket_name.sun_family = AF_UNIX;
-	strncpy (socket_name.sun_path, SOCKET_PATH, sizeof (socket_name.sun_path) - 1);
+	strncpy (socket_name.sun_path, COMMAND_SOCKET_PATH, sizeof (socket_name.sun_path) - 1);
 	
-	unlink (SOCKET_PATH);
+	unlink (COMMAND_SOCKET_PATH);
 	
 	if (bind (sock, (struct sockaddr *) &socket_name, sizeof (struct sockaddr_un)) < 0) {
 		perror ("Bind");
@@ -517,11 +526,11 @@ int manager_setup_socket (NetworkInadorHandle *handle) {
 	}
 	
 	/* TODO: Aplicar permisos aquí */
-	chmod (SOCKET_PATH, 0666);
+	chmod (COMMAND_SOCKET_PATH, 0666);
 	
 	channel = g_io_channel_unix_new (sock);
 	
-	g_io_add_watch (channel, G_IO_IN | G_IO_PRI, _manager_client_data, handle);
+	g_io_add_watch (channel, G_IO_IN | G_IO_PRI | G_IO_ERR | G_IO_HUP, _manager_client_data, handle);
 	
 	return 0;
 }

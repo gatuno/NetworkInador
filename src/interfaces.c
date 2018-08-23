@@ -2,7 +2,7 @@
  * interfaces.c
  * This file is part of Network-inador
  *
- * Copyright (C) 2011 - Félix Arreola Rodríguez
+ * Copyright (C) 2018 - Félix Arreola Rodríguez
  *
  * Network-inador is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -42,6 +42,7 @@
 #include <arpa/inet.h>
 
 #include "interfaces.h"
+#include "manager-events.h"
 
 Interface * interfaces_locate_by_index (Interface *list, int index);
 static IPv4 * _interfaces_append_ipv4_to_struct (Interface *interface, struct in_addr address, uint32_t prefix);
@@ -183,7 +184,7 @@ void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlm
 	struct rtattr *attribute;
 	int len;
 	Interface *new, *last;
-	
+	int was_new = 0;
 	iface = NLMSG_DATA(h);
 	len = h->nlmsg_len - NLMSG_LENGTH (sizeof (struct ifinfomsg));
 	
@@ -208,6 +209,8 @@ void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlm
 			
 			last->next = new;
 		}
+		
+		was_new = 1;
 	}
 	
 	if (iface->ifi_family == AF_BRIDGE) {
@@ -443,6 +446,7 @@ void interfaces_add_or_update_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr
 	if (new == NULL) {
 		printf ("Agregando IP a la lista de IP's\n");
 		new = _interfaces_append_ipv4_to_struct (iface, ip, prefix);
+		manager_events_notify_ipv4_address_added (iface, new);
 	}
 	
 	new->flags = addr->ifa_flags;

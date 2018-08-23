@@ -1,5 +1,5 @@
 /*
- * events.c
+ * netlink-events.c
  * This file is part of Network-inador
  *
  * Copyright (C) 2018 - Félix Arreola Rodríguez
@@ -45,12 +45,12 @@
 
 #include <glib.h>
 
-#include "events.h"
+#include "netlink-events.h"
 #include "network-inador.h"
 #include "interfaces.h"
 #include "routes.h"
 
-static gboolean _events_handle_read (GIOChannel *source, GIOCondition condition, gpointer data) {
+static gboolean _netlink_events_handle_read (GIOChannel *source, GIOCondition condition, gpointer data) {
 	NetworkInadorHandle *handle = (NetworkInadorHandle *) data;
 	int sock;
 	
@@ -116,11 +116,11 @@ static gboolean _events_handle_read (GIOChannel *source, GIOCondition condition,
 	return TRUE;
 }
 
-void events_setup_loop (NetworkInadorHandle *handle, int sock) {
+void netlink_events_setup_loop (NetworkInadorHandle *handle, int sock) {
 	GIOChannel *channel;
 	
 	channel = g_io_channel_unix_new (sock);
 	
-	g_io_add_watch (channel, G_IO_IN | G_IO_PRI, _events_handle_read, handle);
+	g_io_add_watch (channel, G_IO_IN | G_IO_PRI | G_IO_ERR | G_IO_HUP, _netlink_events_handle_read, handle);
 }
 

@@ -29,6 +29,33 @@
 #include <linux/if.h>
 #include <net/ethernet.h>
 
+#include <unistd.h>
+
+#include <glib.h>
+
+/* Para almacenar la información de DHCP */
+enum {
+	IFACE_NO_DHCP_RUNNING = 0,
+	IFACE_DHCP_CLIENT,
+};
+
+enum {
+	DHCP_CLIENT_DECONFIG = 1,
+	DHCP_CLIENT_LEASEFAIL,
+	DHCP_CLIENT_BOUND,
+	DHCP_CLIENT_RENEW,
+	DHCP_CLIENT_NAK
+};
+
+typedef struct _DHCPStateInfo {
+	int type;
+	
+	int read_pipe;
+	GPid process_pid;
+	
+	int client_state;
+} DHCPStateInfo;
+
 typedef struct _IPv4 {
 	struct in_addr sin_addr;
 	uint32_t prefix;
@@ -62,6 +89,8 @@ typedef struct _Interface {
 	int is_nlmon;
 	
 	IPv4 *v4_address;
+	
+	DHCPStateInfo dhcp_info;
 	
 	struct _Interface *next;
 } Interface;

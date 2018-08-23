@@ -42,10 +42,12 @@
 
 #include "network-inador.h"
 #include "interfaces.h"
-#include "events.h"
+#include "netlink-events.h"
 #include "manager.h"
 #include "bridge.h"
 #include "routes.h"
+#include "manager-events.h"
+#include "dhcp.h"
 
 static GMainLoop *loop = NULL;
 
@@ -78,7 +80,6 @@ int main (int argc, char *argv[]) {
 	int nl_sock;
 	int nl_watch;
 	
-	signal (SIGPIPE, SIG_IGN);
 	
 #if !defined(GLIB_VERSION_2_36)
     g_type_init ();
@@ -95,11 +96,13 @@ int main (int argc, char *argv[]) {
 	handle.netlink_sock_request = nl_sock;
 	nl_watch = create_ntlink_socket (-1);
 	
+	manager_events_setup (&handle);
+	
 	interfaces_list_all (&handle, nl_sock);
 	
 	routes_list (&handle, nl_sock);
 	
-	events_setup_loop (&handle, nl_watch);
+	netlink_events_setup_loop (&handle, nl_watch);
 	
 	manager_setup_socket (&handle);
 	

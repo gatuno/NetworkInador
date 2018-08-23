@@ -1,8 +1,8 @@
 /*
- * events.h
+ * dhcp.h
  * This file is part of Network-inador
  *
- * Copyright (C) 2011 - Félix Arreola Rodríguez
+ * Copyright (C) 2018 - Félix Arreola Rodríguez
  *
  * Network-inador is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,12 +20,9 @@
  * Boston, MA  02110-1301  USA
  */
 
-#ifndef __EVENTS_H__
-#define __EVENTS_H__
+#ifndef __DHCP_H__
+#define __DHCP_H__
 
-#include "network-inador.h"
-
-void events_setup_loop (NetworkInadorHandle *handle, int sock);
+void dhcp_run_client (NetworkInadorHandle *handle, Interface *iface);
 
 #endif
-
