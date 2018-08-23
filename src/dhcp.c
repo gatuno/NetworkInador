@@ -38,6 +38,7 @@
 #include "dhcp.h"
 #include "interfaces.h"
 #include "utils.h"
+#include "routes.h"
 
 #define DHCPC_PIPEOUT_HAS_IP 0x01
 #define DHCPC_PIPEOUT_HAS_SERVER_IP 0x02
@@ -137,6 +138,13 @@ static void _dhcp_parse_client_packet (NetworkInadorHandle *handle, Interface *i
 				interfaces_manual_add_ipv4 (handle->netlink_sock_request, iface, &address);
 				
 				/* Y esperar a que se active la IP para luego configurar la ruta */
+				if (has_gateway) {
+					IPv4 default_dest;
+					
+					inet_pton (AF_INET, "0.0.0.0", &default_dest.sin_addr);
+					default_dest.prefix = 0;
+					routes_manual_add_ipv4 (handle->netlink_sock_request, iface, &default_dest, route);
+				}
 			}
 			break;
 	}
@@ -275,3 +283,4 @@ void dhcp_stop_client (NetworkInadorHandle *handle, Interface *iface) {
 		kill (iface->dhcp_info.process_pid, SIGTERM);
 	}
 }
+

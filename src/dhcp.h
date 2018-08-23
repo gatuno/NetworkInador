@@ -24,5 +24,6 @@
 #define __DHCP_H__
 
 void dhcp_run_client (NetworkInadorHandle *handle, Interface *iface);
+void dhcp_stop_client (NetworkInadorHandle *handle, Interface *iface);
 
 #endif

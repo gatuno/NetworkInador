@@ -38,6 +38,7 @@
 #include "manager.h"
 #include "interfaces.h"
 #include "network-inador.h"
+#include "dhcp.h"
 
 #define COMMAND_SOCKET_PATH "/tmp/network-inador.socket"
 
@@ -85,7 +86,9 @@ enum {
 	
 	MANAGER_ERROR_PREFIX_INVALID,
 	MANAGER_ERROR_IFACE_INVALID,
-	MANAGER_ERROR_IPV4_INVALID
+	MANAGER_ERROR_IPV4_INVALID,
+	MANAGER_ERROR_DHCP_ALREADY_RUNNING,
+	MANAGER_ERROR_DHCP_NOT_RUNNING
 };
 
 #define MANAGER_IFACE_TYPE_WIRELESS 0x02
@@ -398,6 +401,46 @@ static void _manager_send_list_ipv4 (NetworkInadorHandle *handle, ManagerCommand
 	_manager_send_response (request, buffer, pos);
 }
 
+static void _manager_handle_interface_set_dhcp (NetworkInadorHandle *handle, ManagerCommandRequest *request) {
+	/* Primero, validar que haya suficientes bytes:
+	 * 1 byte de la interfaz
+	 */
+	
+	int index;
+	Interface *iface;
+	unsigned char buffer[8192];
+	IPv4 *ip_g;
+	int pos;
+	int count;
+	
+	if (request->command_len < 1) {
+		/* Bytes unsuficientes */
+		_manager_send_invalid_request (request, MANAGER_ERROR_INCOMPLETE_REQUEST);
+		return;
+	}
+	
+	index = request->command_data[0];
+	
+	iface = interfaces_locate_by_index (handle->interfaces, index);
+	
+	if (iface == NULL) {
+		_manager_send_invalid_request (request, MANAGER_ERROR_IFACE_INVALID);
+		return;
+	}
+	
+	if (request->command == MANAGER_COMMAND_RUN_DHCP_CLIENT && iface->dhcp_info.type != IFACE_NO_DHCP_RUNNING) {
+		_manager_send_invalid_request (request, MANAGER_ERROR_DHCP_ALREADY_RUNNING);
+	} else if (request->command == MANAGER_COMMAND_STOP_DHCP_CLIENT && iface->dhcp_info.type == IFACE_NO_DHCP_RUNNING) {
+		_manager_send_invalid_request (request, MANAGER_ERROR_DHCP_NOT_RUNNING);
+	} else if (request->command == MANAGER_COMMAND_RUN_DHCP_CLIENT) {
+		dhcp_run_client (handle, iface);
+		_manager_send_processing (request);
+	} else if (request->command == MANAGER_COMMAND_STOP_DHCP_CLIENT) {
+		dhcp_stop_client (handle, iface);
+		_manager_send_processing (request);
+	}
+}
+
 static void _manager_send_list_routes (NetworkInadorHandle *handle, ManagerCommandRequest *request) {
 	unsigned char buffer[8192];
 	Routev4 *route_g;
@@ -480,10 +523,8 @@ static gboolean _manager_client_data (GIOChannel *source, GIOCondition condition
 			_manager_handle_interface_del_ipv4 (handle, &request);
 			break;
 		case MANAGER_COMMAND_RUN_DHCP_CLIENT:
-			
-			break;
 		case MANAGER_COMMAND_STOP_DHCP_CLIENT:
-			
+			_manager_handle_interface_set_dhcp (handle, &request);
 			break;
 		case MANAGER_COMMAND_LIST_IPV4:
 			_manager_send_list_ipv4 (handle, &request);
