@@ -65,6 +65,20 @@ typedef struct _IPv4 {
 	struct _IPv4 *next;
 } IPv4;
 
+typedef struct _WirelessAccessPoint {
+	int freq;
+	int essid;
+	char bssid[10];
+	
+	struct _WirelessAccessPoint *next;
+} WirelessAccessPoint;
+
+typedef struct {
+	int wiphy;
+	
+	WirelessAccessPoint *scaned_aps;
+} WirelessInfo;
+
 typedef struct _Interface {
 	char name[IFNAMSIZ];
 	int ifi_type;
@@ -92,6 +106,9 @@ typedef struct _Interface {
 	
 	DHCPStateInfo dhcp_info;
 	
+	/* Información wireless */
+	WirelessInfo *wireless;
+	
 	struct _Interface *next;
 } Interface;
 
@@ -113,6 +130,7 @@ typedef struct {
 	Routev4 *rtable_v4;
 	
 	int netlink_sock_request;
+	int netlink_sock_request_generic;
 } NetworkInadorHandle;
 
 #endif

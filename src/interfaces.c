@@ -42,6 +42,7 @@
 #include <arpa/inet.h>
 
 #include "interfaces.h"
+#include "wireless.h"
 #include "manager-events.h"
 
 Interface * interfaces_locate_by_index (Interface *list, int index);
@@ -331,7 +332,14 @@ void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlm
 					}
 				}
 				break;
+			//default:
+				//printf ("RTA Attribute \"%hu\" no procesado\n", attribute->rta_type);
 		}
+	}
+	
+	if (was_new) {
+		/* Como la interfaz es nueva, buscar si tiene extensiones wireless */
+		wireless_check_is_wireless_interface (handle, new);
 	}
 }
 
@@ -340,6 +348,7 @@ void interfaces_del_rtnl_link (NetworkInadorHandle *handle, struct nlmsghdr *h) 
 	Interface *to_del, *last;
 	IPv4 *address;
 	struct rtattr *attribute;
+	char real_hw[10];
 	int len;
 	int index;
 	
@@ -903,7 +912,7 @@ void interfaces_list_all (NetworkInadorHandle *handle, int sock) {
 	
 	req.hdr.nlmsg_len = NLMSG_LENGTH(sizeof(struct rtgenmsg));
 	req.hdr.nlmsg_type = RTM_GETLINK;
-	req.hdr.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP; 
+	req.hdr.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
 	req.hdr.nlmsg_seq = global_nl_seq++;
 	req.hdr.nlmsg_pid = local_nl.nl_pid;
 	req.gen.rtgen_family = AF_PACKET; /*  no preferred AF, we will get *all* interfaces */

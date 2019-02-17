@@ -10,7 +10,8 @@ network_inador_SOURCES = network-inador.c network-inador.h \
 	rta_aux.c rta_aux.h \
 	routes.c routes.h \
 	manager-events.c manager-events.h \
-	dhcp.c dhcp.h
+	dhcp.c dhcp.h \
+	wireless.c
 
 #network_inador_CPPFLAGS = -DGAMEDATA_DIR=\"$(gamedatadir)/\" -DLOCALEDIR=\"$(localedir)\" $(AM_CPPFLAGS)
 network_inador_CPPFLAGS = -DLOCALEDIR=\"$(localedir)\" $(AM_CPPFLAGS)
