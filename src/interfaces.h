@@ -2,7 +2,7 @@
  * interfaces.h
  * This file is part of Network-inador
  *
- * Copyright (C) 2018 - Félix Arreola Rodríguez
+ * Copyright (C) 2019, 2020 - Félix Arreola Rodríguez
  *
  * Network-inador is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,28 +23,17 @@
 #ifndef __INTERFACES_H__
 #define __INTERFACES_H__
 
-#include <asm/types.h>
-#include <sys/socket.h>
-#include <linux/netlink.h>
+#include "common.h"
 
-#include "network-inador.h"
+void interfaces_init (NetworkInadorHandle *handle);
+int interface_receive_message_newlink (struct nl_msg *msg, void *arg);
+int interface_receive_message_dellink (struct nl_msg *msg, void *arg);
 
-extern int global_nl_seq;
-
-void interfaces_list_all (NetworkInadorHandle *handle, int sock);
-Interface * interfaces_locate_by_index (Interface *list, int index);
-void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlmsghdr *h, int first_time);
-void interfaces_del_rtnl_link (NetworkInadorHandle *handle, struct nlmsghdr *h);
-void interfaces_add_or_update_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr *h);
-void interfaces_del_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr *h);
-
-IPv4 * _interfaces_serach_ipv4 (Interface *interface, struct in_addr address, uint32_t prefix);
-
-void interfaces_clear_all_ipv4_address (NetworkInadorHandle *handle, Interface *interface);
-void interfaces_manual_add_ipv4 (int sock, Interface *interface, IPv4 *address);
-void interfaces_manual_del_ipv4 (int sock, Interface *interface, IPv4 *address);
-void interfaces_bring_up (int sock, Interface *interface);
-void interfaces_bring_down (int sock, Interface *interface);
+int interfaces_change_mac_address (NetworkInadorHandle *handle, int index, void *new_mac);
+int interfaces_change_mtu (NetworkInadorHandle *handle, int index, uint32_t new_mtu);
+int interfaces_change_set_up (NetworkInadorHandle *handle, int index);
+int interfaces_change_set_down (NetworkInadorHandle *handle, int index);
+int interfaces_change_name (NetworkInadorHandle *handle, int index, char * new_name);
 
 #endif
 

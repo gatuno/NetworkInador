@@ -1,2 +1,2 @@
 # List of source files which contain translatable strings.
-src/network-inador.c
+src/main.c

@@ -2,7 +2,7 @@
  * netlink-events.h
  * This file is part of Network-inador
  *
- * Copyright (C) 2018 - Félix Arreola Rodríguez
+ * Copyright (C) 2019, 2020 - Félix Arreola Rodríguez
  *
  * Network-inador is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,9 +23,8 @@
 #ifndef __NETLINK_EVENTS_H__
 #define __NETLINK_EVENTS_H__
 
-#include "network-inador.h"
+#include "common.h"
 
-void netlink_events_setup_loop (NetworkInadorHandle *handle, int sock);
+void netlink_events_setup (NetworkInadorHandle *handle);
 
 #endif
-

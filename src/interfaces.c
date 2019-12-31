@@ -2,7 +2,7 @@
  * interfaces.c
  * This file is part of Network-inador
  *
- * Copyright (C) 2018 - Félix Arreola Rodríguez
+ * Copyright (C) 2019, 2020 - Félix Arreola Rodríguez
  *
  * Network-inador is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,936 +20,538 @@
  * Boston, MA  02110-1301  USA
  */
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
-#include <stdint.h>
+#include <netlink/socket.h>
+#include <netlink/msg.h>
 
-#include <unistd.h>
-
-#include <sys/types.h>
-#include <sys/socket.h>
-
-#include <linux/netlink.h>
-#include <linux/rtnetlink.h>
-#include <linux/if.h>
-#include <linux/if_addr.h>
-
-#include <net/ethernet.h>
 #include <net/if_arp.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 
-#include "interfaces.h"
-#include "wireless.h"
-#include "manager-events.h"
+#include <gmodule.h>
 
-Interface * interfaces_locate_by_index (Interface *list, int index);
-static IPv4 * _interfaces_append_ipv4_to_struct (Interface *interface, struct in_addr address, uint32_t prefix);
+#include "common.h"
 
-int global_nl_seq = 1;
+static int _interfaces_receive_message_interface (struct nl_msg *msg, void *arg, int first_time);
+Interface * _interfaces_locate_by_index (GList *list, int index);
 
-typedef struct {
-	struct nlmsghdr hdr;
-	struct rtgenmsg gen;
-} nl_req_t;
-
-Interface * interfaces_locate_by_index (Interface *list, int index) {
-	Interface *iface;
-	
-	iface = list;
-	
-	while (iface != NULL) {
-		if (iface->index == index) {
-			return iface;
-		}
-		iface = iface->next;
-	}
-	
-	return NULL;
+static int _interfaces_list_first_time (struct nl_msg *msg, void *arg) {
+	return _interfaces_receive_message_interface (msg, arg, TRUE);
 }
 
-static IPv4 * _interfaces_append_ipv4_to_struct (Interface *interface, struct in_addr address, uint32_t prefix) {
-	IPv4 *new_addr, *last;
-	
-	new_addr = (IPv4 *) malloc (sizeof (IPv4));
-	
-	new_addr->sin_addr = address;
-	new_addr->prefix = prefix;
-	
-	new_addr->next = NULL;
-	
-	if (interface->v4_address == NULL) {
-		interface->v4_address = new_addr;
-	} else {
-		last = interface->v4_address;
-		
-		while (last->next != NULL) {
-			last = last->next;
-		}
-		
-		last->next = new_addr;
-	}
-	
-	return new_addr;
+int interface_receive_message_newlink (struct nl_msg *msg, void *arg) {
+	return _interfaces_receive_message_interface (msg, arg, FALSE);
 }
 
-IPv4 * _interfaces_serach_ipv4 (Interface *interface, struct in_addr address, uint32_t prefix) {
-	IPv4 *list;
-	
-	list = interface->v4_address;
-	
-	while (list != NULL) {
-		if (list->sin_addr.s_addr == address.s_addr && list->prefix == prefix) {
-			return list;
-		}
-		list = list->next;
-	}
-	
-	return NULL;
-}
-
-static void _interfaces_list_ipv4_address (NetworkInadorHandle *handle, int sock) {
-	struct msghdr rtnl_msg;    /* generic msghdr struct for use with sendmsg */
-	struct iovec io;
-	struct ifaddrmsg *ifa;
-	struct sockaddr_nl kernel;
-	char buffer[8192]; /* a large buffer */
-	int len;
-	
-	/* Para la respuesta */
-	struct nlmsghdr *msg_ptr;    /* pointer to current part */
-	
-	struct sockaddr_nl local_nl;
-	socklen_t local_size;
-	
-	/* Recuperar el puerto local del netlink */
-	local_size = sizeof (local_nl);
-	getsockname (sock, (struct sockaddr *) &local_nl, &local_size);
-	
-	memset (&rtnl_msg, 0, sizeof (rtnl_msg));
-	memset (&kernel, 0, sizeof (kernel));
-	memset (buffer, 0, sizeof (buffer));
-
-	kernel.nl_family = AF_NETLINK; /* fill-in kernel address (destination of our message) */
-	kernel.nl_groups = 0;
-	
-	msg_ptr = (struct nlmsghdr *) buffer;
-	msg_ptr->nlmsg_len = NLMSG_LENGTH (sizeof (struct ifaddrmsg));
-	msg_ptr->nlmsg_type = RTM_GETADDR;
-	msg_ptr->nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
-	msg_ptr->nlmsg_seq = global_nl_seq++;
-	msg_ptr->nlmsg_pid = local_nl.nl_pid;
-	
-	ifa = (struct ifaddrmsg *) NLMSG_DATA (msg_ptr);
-	ifa->ifa_family = AF_INET;
-
-	io.iov_base = buffer;
-	io.iov_len = msg_ptr->nlmsg_len;
-	rtnl_msg.msg_iov = &io;
-	rtnl_msg.msg_iovlen = 1;
-	rtnl_msg.msg_name = &kernel;
-	rtnl_msg.msg_namelen = sizeof(kernel);
-	
-	sendmsg (sock, (struct msghdr *) &rtnl_msg, 0);
-	
-	/* Esperar la respuesta */
-	memset (&io, 0, sizeof (io));
-	memset (&rtnl_msg, 0, sizeof (rtnl_msg));
-	memset (buffer, 0, sizeof (buffer));
-	
-	io.iov_base = buffer;
-	io.iov_len = sizeof (buffer);
-	rtnl_msg.msg_iov = &io;
-	rtnl_msg.msg_iovlen = 1;
-	rtnl_msg.msg_name = &kernel;
-	rtnl_msg.msg_namelen = sizeof (kernel);
-
-	while ((len = recvmsg (sock, &rtnl_msg, 0)) > 0) { /* read lots of data */
-		msg_ptr = (struct nlmsghdr *) buffer;
-		if (msg_ptr->nlmsg_type == NLMSG_DONE) break;
-	
-		for (; NLMSG_OK (msg_ptr, len); msg_ptr = NLMSG_NEXT (msg_ptr, len)) {
-			/* Procesar solo los mensajes de nueva interfaz */
-			printf ("Msg type: %i\n", msg_ptr->nlmsg_type);
-			if (msg_ptr->nlmsg_type == RTM_NEWADDR) {
-				interfaces_add_or_update_ipv4 (handle, msg_ptr);
-			}
-		}
-	}
-}
-
-void interfaces_add_or_update_rtnl_link (NetworkInadorHandle *handle, struct nlmsghdr *h, int first_time) {
-	struct ifinfomsg *iface;
-	struct rtattr *attribute;
-	int len;
-	Interface *new, *last;
+static int _interfaces_receive_message_interface (struct nl_msg *msg, void *arg, int first_time) {
+	struct nlmsghdr *reply;
+	struct ifinfomsg *iface_msg;
+	int remaining;
+	struct nlattr *attr;
+	NetworkInadorHandle *handle = (NetworkInadorHandle *) arg;
 	int was_new = 0;
-	iface = NLMSG_DATA(h);
-	len = h->nlmsg_len - NLMSG_LENGTH (sizeof (struct ifinfomsg));
+	Interface *iface;
+	uint32_t u32data;
 	
-	//printf ("Mensaje de nueva interfaz: %i\n", iface->ifi_index);
-	new = interfaces_locate_by_index (handle->interfaces, iface->ifi_index);
+	reply = nlmsg_hdr (msg);
 	
-	/* Si el objeto interface no existe, crearlo y ligarlo en la lista de interfaces */
-	if (new == NULL) {
-		//printf ("Creando...\n");
-		new = malloc (sizeof (Interface));
-		memset (new, 0, sizeof (Interface));
-		new->next = NULL;
+	if (reply->nlmsg_type != RTM_NEWLINK) return NL_SKIP;
+	
+	iface_msg = nlmsg_data (reply);
+	
+	iface = _interfaces_locate_by_index (handle->interfaces, iface_msg->ifi_index);
+	
+	if (iface == NULL) {
+		/* Crear esta interfaz */
+		iface = g_new0 (Interface, 1);
 		
-		if (handle->interfaces == NULL) {
-			handle->interfaces = new;
-		} else {
-			last = handle->interfaces;
-			
-			while (last->next != NULL) {
-				last = last->next;
-			}
-			
-			last->next = new;
-		}
+		handle->interfaces = g_list_append (handle->interfaces, iface);
 		
 		was_new = 1;
 	}
 	
-	if (iface->ifi_family == AF_BRIDGE) {
+	if (iface_msg->ifi_family == AF_BRIDGE) {
 		/* Tenemos un evento especial, se está agregando una interfaz a un bridge */
-		for (attribute = IFLA_RTA(iface); RTA_OK(attribute, len); attribute = RTA_NEXT(attribute, len)) {
-			switch(attribute->rta_type) {
-				case IFLA_MASTER:
-					memcpy (&new->master_index, RTA_DATA (attribute), 4);
-					break;
+		nlmsg_for_each_attr(attr, reply, sizeof (struct ifinfomsg), remaining) {
+			if (nla_type (attr) == IFLA_MASTER) {
+				if (nla_len (attr) != 4) {
+					/* Tamaño incorrecto para el nuevo master */
+					return NL_SKIP;
+				}
+				u32data = nla_get_u32 (attr);
+				iface->master_index = u32data;
 			}
 		}
 		
-		return;
+		printf ("Interface %d agregada a la interfaz %d (bridge)\n", iface->index, iface->master_index);
+		/* Generar EVENTO AQUI */
+		return NL_SKIP;
 	}
 	
-	new->ifi_type = iface->ifi_type;
+	printf ("Interface %d ifi_type: %d\n", iface_msg->ifi_index, iface_msg->ifi_type);
+	iface->ifi_type = iface_msg->ifi_type;
 	/* TODO: Checar aquí cambio de flags */
-	new->flags = iface->ifi_flags;
-	new->index = iface->ifi_index;
+	printf ("Interface %d ifi_flags: %d\n", iface_msg->ifi_index, iface_msg->ifi_flags);
+	iface->flags = iface_msg->ifi_flags;
+	iface->index = iface_msg->ifi_index;
 	
-	if (iface->ifi_type == ARPHRD_LOOPBACK) {
+	if (iface_msg->ifi_type == ARPHRD_LOOPBACK) {
 		/* Es loopback */
-		new->is_loopback = 1;
+		iface->is_loopback = 1;
 	}
 	
-	if (iface->ifi_type == ARPHRD_ETHER) {
-		/* Es ethernet */
-	}
-	
-	for (attribute = IFLA_RTA(iface); RTA_OK(attribute, len); attribute = RTA_NEXT(attribute, len)) {
-		//printf ("Attribute: %d\n", attribute->rta_type);
-		switch(attribute->rta_type) {
+	nlmsg_for_each_attr(attr, reply, sizeof (struct ifinfomsg), remaining) {
+		switch (nla_type (attr)) {
+			//nla_len (Attr);
 			case IFLA_IFNAME: 
-				//printf ("Interface %d : %s\n", iface->ifi_index, (char *) RTA_DATA(attribute));
+				printf ("Interface %d : %s\n", iface_msg->ifi_index, (char *) nla_data (attr));
 				// Actualizar el nombre de la interfaz */
-				strncpy (new->name, RTA_DATA (attribute), IFNAMSIZ);
+				/* TODO Revisar cambio de nombre aquí y generar evento */
+				strncpy (iface->name, nla_data (attr), IFNAMSIZ);
 				break;
 			case IFLA_ADDRESS:
-				/* FIXME: ¿Debería no actualizar la mac address siempre? */
-				memcpy (new->real_hw, RTA_DATA (attribute), ETHER_ADDR_LEN);
+				if (nla_len (attr) > ETHER_ADDR_LEN) {
+					printf ("----- Warning, address es mayor que ETHER_ADDR_LEN\n");
+					continue;
+				}
+				memcpy (iface->real_hw, nla_data (attr), nla_len (attr));
 				//printf ("Interface %d has hw addr: %02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx\n", iface->ifi_index, new->real_hw[0], new->real_hw[1], new->real_hw[2], new->real_hw[3], new->real_hw[4], new->real_hw[5]);
 				break;
-			case IFLA_WIRELESS:
-				/* TODO: Procesar enlaces los mensajes de enlaces inalambricos */
-				break;
 			case IFLA_MASTER:
-				if (first_time) {
-					memcpy (&new->master_index, RTA_DATA (attribute), 4);
-					//printf ("Interface %d has master: %i\n", iface->ifi_index, new->master_index);
+				if (nla_len (attr) != 4) {
+					/* Tamaño incorrecto para el nuevo master */
+					continue;
 				}
+				if (first_time == FALSE) continue;
+				u32data = nla_get_u32 (attr);
+				iface->master_index = u32data;
+				printf ("Interface %d has master: %d\n", iface->index, iface->master_index);
 				break;
 			case IFLA_MTU:
-					memcpy (&new->mtu, RTA_DATA (attribute), attribute->rta_len);
-					
-					//printf ("Interface %d has mtu: %u\n", iface->ifi_index, new->mtu);
-				break;
-			case IFLA_OPERSTATE:
-				{
-					unsigned int operstate;
-					memcpy (&operstate, RTA_DATA (attribute), sizeof (operstate));
+				if (nla_len (attr) != 4) {
+					/* Tamaño incorrecto para el mtu */
+					continue;
 				}
+				u32data = nla_get_u32 (attr);
+				
+				/* TODO: Revisar cambio de mtu y generar EVENTO aqui */
+				iface->mtu = u32data;
+				
+				//printf ("Interface %d has mtu: %u\n", iface->ifi_index, new->mtu);
 				break;
-			/*case IFLA_AF_SPEC:
-				{
-					struct rtattr * sub_attr;
-					int sub_len;
-					int nla_len;
-					
-					sub_len = attribute->rta_len;
-					
-					sub_attr = RTA_DATA (attribute);
-					
-					while (sub_len > sizeof (sub_attr)) {
-						nla_len = sub_attr->rta_len;
-						
-						if (nla_len > sub_len) {
-							printf ("Los sub atributos se acabaron prematuramente\n");
-							break;
-						}
-						printf ("Interface %d, IFLA_AF_SPEC, sub attributo type: %i\n", iface->ifi_index, sub_attr->rta_type);
-						
-						sub_len -= RTA_ALIGN (nla_len);
-						sub_attr = (struct rtattr *) (((char *) sub_attr) + RTA_ALIGN (nla_len));
-					}
-				}
-				break;*/
 			case IFLA_LINKINFO:
 				{
-					struct rtattr * nest_attr;
-					int nest_size;
-					int sub_len;
+					struct nlattr *sub_attr;
+					int sub_remaining;
 					
-					nest_size = attribute->rta_len;
-					nest_attr = RTA_DATA (attribute);
-					
-					while (nest_size > sizeof (nest_attr)) {
-						sub_len = nest_attr->rta_len;
-						
-						if (sub_len > nest_size) {
-							//printf ("Los sub atributos se acabaron prematuramente\n");
-							break;
+					nla_for_each_nested(sub_attr, attr, sub_remaining) {
+						switch (nla_type (sub_attr)) {
+							case IFLA_INFO_KIND:
+								printf ("IFLA_INFO_KIND: %s\n", nla_data (sub_attr));
+								if (strcmp (nla_data (sub_attr), "vlan") == 0) {
+									iface->is_vlan = 1;
+									
+								} else if (strcmp (nla_data (sub_attr), "nlmon") == 0) {
+									iface->is_nlmon = 1;
+								} else if (strcmp (nla_data (sub_attr), "bridge") == 0) {
+									iface->is_bridge = 1;
+								} else if (strcmp (nla_data (sub_attr), "dummy") == 0) {
+									iface->is_dummy = 1;
+								}
+								break;
 						}
-						//printf ("Interface %d, IFLA_LINKINFO, sub attributo type: %i\n", iface->ifi_index, nest_attr->rta_type);
-						
-						if (nest_attr->rta_type == IFLA_INFO_KIND) {
-							printf ("IFLA_INFO_KIND: %s\n", RTA_DATA (nest_attr));
-							if (strcmp (RTA_DATA (nest_attr), "vlan") == 0) {
-								new->is_vlan = 1;
-							} else if (strcmp (RTA_DATA (nest_attr), "nlmon") == 0) {
-								new->is_nlmon = 1;
-							} else if (strcmp (RTA_DATA (nest_attr), "bridge") == 0) {
-								new->is_bridge = 1;
-							}
-						}
-						
-						nest_size -= RTA_ALIGN (sub_len);
-						nest_attr = (struct rtattr *) (((char *) nest_attr) + RTA_ALIGN (sub_len));
 					}
 				}
 				break;
+			case IFLA_LINK:
+				/* Corresponde a la interfaz real de una vlan */
+				if (nla_len (attr) != 4) {
+					/* Tamaño incorrecto para el vlan parent */
+					continue;
+				}
+				
+				u32data = nla_get_u32 (attr);
+				iface->vlan_parent = u32data;
+				printf ("Interface %d: tiene como padre a %d\n", iface->index, iface->vlan_parent);
 			//default:
-				//printf ("RTA Attribute \"%hu\" no procesado\n", attribute->rta_type);
+				//printf ("RTA Attribute \"%hu\" no procesado\n", nla_type (attr));
 		}
 	}
 	
-	if (was_new) {
-		/* Como la interfaz es nueva, buscar si tiene extensiones wireless */
-		wireless_check_is_wireless_interface (handle, new);
-	}
+	return NL_SKIP;
 }
 
-void interfaces_del_rtnl_link (NetworkInadorHandle *handle, struct nlmsghdr *h) {
-	struct ifinfomsg *iface;
-	Interface *to_del, *last;
-	IPv4 *address;
-	struct rtattr *attribute;
-	char real_hw[10];
-	int len;
-	int index;
+Interface * _interfaces_locate_by_index (GList *list, int index) {
+	Interface *iface;
 	
-	iface = NLMSG_DATA(h);
-	len = h->nlmsg_len - NLMSG_LENGTH (sizeof (struct ifinfomsg));
+	GList *g;
 	
-	printf ("Mensaje de eliminar interfaz: %i\n", iface->ifi_index);
-	to_del = interfaces_locate_by_index (handle->interfaces, iface->ifi_index);
+	for (g = list; g != NULL; g = g->next) {
+		iface = (Interface *) g->data;
+		
+		if (iface->index == index) {
+			return iface;
+		}
+	}
 	
-	if (to_del == NULL) {
+	return NULL;
+}
+
+static int _interfaces_wait_ack_or_error (struct nl_msg *msg, void *arg) {
+	int *ret = (int *) arg;
+	struct nlmsgerr *l_err;
+	struct nlmsghdr *reply;
+	
+	reply = nlmsg_hdr (msg);
+	
+	if (reply->nlmsg_type == NLMSG_ERROR) {
+		l_err = nlmsg_data (reply);
+		
+		*ret = l_err->error;
+	}
+	
+	return NL_SKIP;
+}
+
+static int _interfaces_wait_error (struct sockaddr_nl *nla, struct nlmsgerr *l_err, void *arg) {
+	int *ret = (int *) arg;
+	
+	*ret = l_err->error;
+	
+	return NL_SKIP;
+}
+
+int interface_receive_message_dellink (struct nl_msg *msg, void *arg) {
+	NetworkInadorHandle *handle = (NetworkInadorHandle *) arg;
+	Interface *iface;
+	struct ifinfomsg *iface_msg;
+	int remaining;
+	uint32_t u32data;
+	struct nlmsghdr *reply;
+	struct nlattr *attr;
+	
+	reply = nlmsg_hdr (msg);
+	
+	if (reply->nlmsg_type != RTM_NEWLINK) return NL_SKIP;
+	
+	iface_msg = nlmsg_data (reply);
+	
+	iface = _interfaces_locate_by_index (handle->interfaces, iface_msg->ifi_index);
+	
+	if (iface == NULL) {
 		printf ("Error, solicitaron eliminar interfaz que ya no existe\n");
 		
-		return;
+		return NL_SKIP;
 	}
 	
-	if (iface->ifi_family == AF_BRIDGE) {
-		/* Tenemos un evento especial, se está eliminando una interfaz a un bridge */
-		for (attribute = IFLA_RTA(iface); RTA_OK(attribute, len); attribute = RTA_NEXT(attribute, len)) {
-			switch(attribute->rta_type) {
-				case IFLA_MASTER:
-					memcpy (&index, RTA_DATA (attribute), 4);
-					to_del->master_index = 0;
-					break;
+	if (iface_msg->ifi_family == AF_BRIDGE) {
+		/* Tenemos un evento especial, se está eliminando una interfaz de un bridge */
+		nlmsg_for_each_attr(attr, reply, sizeof (struct ifinfomsg), remaining) {
+			if (nla_type (attr) == IFLA_MASTER) {
+				if (nla_len (attr) != 4) {
+					/* Tamaño incorrecto para el nuevo master */
+					return NL_SKIP;
+				}
+				u32data = nla_get_u32 (attr);
+				iface->master_index = 0;
 			}
 		}
 		
-		return;
+		printf ("Interface %d eliminada de la interfaz %d (bridge)\n", iface->index, iface->master_index);
+		/* Generar EVENTO AQUI */
+		return NL_SKIP;
 	}
 	
-	/* Borrar las estructuras IP que contenga */
-	address = to_del->v4_address;
+	handle->interfaces = g_list_remove (handle->interfaces, iface);
 	
-	while (address != NULL) {
-		to_del->v4_address = address->next;
-		
-		free (address);
-		
-		address = to_del->v4_address;
-	}
-	
-	/* Borrar el objeto interfaz */
-	if (to_del == handle->interfaces) {
-		/* Primero de la lista */
-		
-		handle->interfaces = to_del->next;
-	} else {
-		last = handle->interfaces;
-		
-		while (last->next != to_del) {
-			last = last->next;
-		}
-		
-		last->next = to_del->next;
-	}
-	
-	free (to_del);
+	g_free (iface);
 }
 
-void interfaces_add_or_update_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr *h) {
-	struct ifaddrmsg *addr;
-	struct rtattr *attribute;
-	struct in_addr ip;
-	char ip_as_string[1024];
+int interfaces_change_mac_address (NetworkInadorHandle *handle, int index, void *new_mac) {
+	/* ETHER_ADDR_LEN */
+	struct nl_msg * msg;
+	struct ifinfomsg iface_hdr;
+	int ret, error;
 	Interface *iface;
-	IPv4 *new;
-	uint32_t prefix;
 	
-	addr = NLMSG_DATA(h);
-	
-	prefix = addr->ifa_prefixlen;
-	
-	iface = interfaces_locate_by_index (handle->interfaces, addr->ifa_index);
+	iface = _interfaces_locate_by_index (handle->interfaces, index);
 	
 	if (iface == NULL) {
-		/* No encuentro la interfaz... */
-		return;
-	}
-	
-	printf ("IP para la interfaz: %d, de la familia: %d\n", addr->ifa_index, addr->ifa_family);
-	size_t len = IFA_PAYLOAD (h);
-	
-	for (attribute = IFA_RTA (addr); RTA_OK (attribute, len); attribute = RTA_NEXT (attribute, len)) {
-		//printf ("Attribute (addr): %d\n", attribute->rta_type);
+		printf ("Error, solicitaron eliminar interfaz que ya no existe\n");
 		
-		if (attribute->rta_type == IFA_LOCAL) {
-			memcpy (&ip, RTA_DATA (attribute), sizeof (struct in_addr));
-			
-			inet_ntop (AF_INET, &ip, ip_as_string, sizeof (ip_as_string));
-			printf ("Address: %s/%d\n", ip_as_string, addr->ifa_prefixlen);
-			break;
-		} else if (attribute->rta_type == IFA_ADDRESS && addr->ifa_family == AF_INET6) {
-			inet_ntop (AF_INET6, RTA_DATA (attribute), ip_as_string, sizeof (ip_as_string));
-			printf ("Address v6: %s/%d\n", ip_as_string, addr->ifa_prefixlen);
-		}
+		return -1;
 	}
 	
-	if (addr->ifa_family != AF_INET) {
-		/* Por el momento, las direcciones IPv6 no son procesadas */
-		return;
+	iface_hdr.ifi_family = AF_UNSPEC;
+	iface_hdr.ifi_type = iface->ifi_type;
+	iface_hdr.ifi_index = iface->index;
+	iface_hdr.ifi_flags = iface->flags;
+	iface_hdr.ifi_change = 0xFFFFFFFF;
+	
+	msg = nlmsg_alloc_simple (RTM_NEWLINK, NLM_F_REQUEST);
+	ret = nlmsg_append (msg, &iface_hdr, sizeof (iface_hdr), NLMSG_ALIGNTO);
+	
+	if (ret != 0) {
+		nlmsg_free (msg);
+		
+		return -1;
 	}
 	
-	new = _interfaces_serach_ipv4 (iface, ip, prefix);
+	ret = nla_put (msg, IFLA_ADDRESS, ETHER_ADDR_LEN, new_mac);
 	
-	if (new == NULL) {
-		printf ("Agregando IP a la lista de IP's\n");
-		new = _interfaces_append_ipv4_to_struct (iface, ip, prefix);
-		manager_events_notify_ipv4_address_added (iface, new);
+	if (ret != 0) {
+		nlmsg_free (msg);
+		
+		return -1;
 	}
 	
-	new->flags = addr->ifa_flags;
+	nl_complete_msg (handle->nl_sock_route, msg);
+	
+	ret = nl_send (handle->nl_sock_route, msg);
+	
+	nlmsg_free (msg);
+	if (ret <= 0) {
+		return -1;
+	}
+	
+	error = 0;
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_VALID, NL_CB_CUSTOM, _interfaces_wait_ack_or_error, &error);
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_INVALID, NL_CB_CUSTOM, _interfaces_wait_ack_or_error, &error);
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_ACK, NL_CB_CUSTOM, _interfaces_wait_ack_or_error, &error);
+	nl_socket_modify_err_cb (handle->nl_sock_route, NL_CB_CUSTOM, _interfaces_wait_error, &error);
+	
+	nl_recvmsgs_default (handle->nl_sock_route);
+	
+	if (ret != 0 || error < 0) {
+		return -1;
+	}
+	
+	return 0;
 }
 
-void interfaces_del_ipv4 (NetworkInadorHandle *handle, struct nlmsghdr *h) {
-	struct ifaddrmsg *addr;
-	struct rtattr *attribute;
-	struct in_addr ip;
-	char ip_as_string[1024];
+int interfaces_change_mtu (NetworkInadorHandle *handle, int index, uint32_t new_mtu) {
+	/* ETHER_ADDR_LEN */
+	struct nl_msg * msg;
+	struct ifinfomsg iface_hdr;
+	int ret, error;
 	Interface *iface;
-	IPv4 *new, *before;
-	uint32_t prefix;
 	
-	addr = NLMSG_DATA(h);
-	
-	prefix = addr->ifa_prefixlen;
-	
-	iface = interfaces_locate_by_index (handle->interfaces, addr->ifa_index);
+	iface = _interfaces_locate_by_index (handle->interfaces, index);
 	
 	if (iface == NULL) {
-		/* No encuentro la interfaz... */
-		return;
-	}
-	
-	printf ("IP eliminada para la interfaz: %d, de la familia: %d\n", addr->ifa_index, addr->ifa_family);
-	
-	size_t len = IFA_PAYLOAD (h);
-	
-	for (attribute = IFA_RTA (addr); RTA_OK (attribute, len); attribute = RTA_NEXT (attribute, len)) {
-		//printf ("Attribute (addr): %d\n", attribute->rta_type);
+		printf ("Error, solicitaron eliminar interfaz que ya no existe\n");
 		
-		if (attribute->rta_type == IFA_LOCAL) {
-			memcpy (&ip, RTA_DATA (attribute), sizeof (struct in_addr));
-			
-			inet_ntop (AF_INET, &ip, ip_as_string, sizeof (ip_as_string));
-			printf ("Address: %s/%d\n", ip_as_string, addr->ifa_prefixlen);
-			break;
-		} else if (attribute->rta_type == IFA_ADDRESS && addr->ifa_family == AF_INET6) {
-			inet_ntop (AF_INET6, RTA_DATA (attribute), ip_as_string, sizeof (ip_as_string));
-			printf ("Address v6: %s/%d\n", ip_as_string, addr->ifa_prefixlen);
-		}
+		return -1;
 	}
 	
-	if (addr->ifa_family != AF_INET) {
-		/* Por el momento, las direcciones IPv6 no son procesadas */
-		return;
+	iface_hdr.ifi_family = AF_UNSPEC;
+	iface_hdr.ifi_type = iface->ifi_type;
+	iface_hdr.ifi_index = iface->index;
+	iface_hdr.ifi_flags = iface->flags;
+	iface_hdr.ifi_change = 0xFFFFFFFF;
+	
+	msg = nlmsg_alloc_simple (RTM_NEWLINK, NLM_F_REQUEST);
+	ret = nlmsg_append (msg, &iface_hdr, sizeof (iface_hdr), NLMSG_ALIGNTO);
+	
+	if (ret != 0) {
+		nlmsg_free (msg);
+		
+		return -1;
 	}
 	
-	new = _interfaces_serach_ipv4 (iface, ip, prefix);
+	ret = nla_put (msg, IFLA_MTU, sizeof (new_mtu), &new_mtu);
 	
-	if (new == NULL) {
-		printf ("Me solicitaron eliminar la IP y NO existe\n");
+	if (ret != 0) {
+		nlmsg_free (msg);
+		
+		return -1;
+	}
+	
+	nl_complete_msg (handle->nl_sock_route, msg);
+	
+	ret = nl_send (handle->nl_sock_route, msg);
+	
+	nlmsg_free (msg);
+	if (ret <= 0) {
+		return -1;
+	}
+	
+	error = 0;
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_VALID, NL_CB_CUSTOM, _interfaces_wait_ack_or_error, &error);
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_INVALID, NL_CB_CUSTOM, _interfaces_wait_ack_or_error, &error);
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_ACK, NL_CB_CUSTOM, _interfaces_wait_ack_or_error, &error);
+	nl_socket_modify_err_cb (handle->nl_sock_route, NL_CB_CUSTOM, _interfaces_wait_error, &error);
+	
+	nl_recvmsgs_default (handle->nl_sock_route);
+	
+	if (ret != 0 || error < 0) {
+		return -1;
+	}
+	
+	return 0;
+}
+
+static int _interfaces_change_admin_up (NetworkInadorHandle *handle, int index, int up) {
+	struct nl_msg * msg;
+	struct ifinfomsg iface_hdr;
+	int ret, error;
+	Interface *iface;
+	
+	iface = _interfaces_locate_by_index (handle->interfaces, index);
+	
+	if (iface == NULL) {
+		printf ("Error, solicitaron eliminar interfaz que ya no existe\n");
+		
+		return -1;
+	}
+	
+	if (up && (iface->flags & IFF_UP)) {
+		/* Ningún cambio necesario, ya está activa */
+		return 0;
+	} else if (up == FALSE && ((iface->flags & IFF_UP) == 0)) {
+		/* Ningún cambio necesario, ya está desactivada */
+		return 0;
+	}
+	
+	iface_hdr.ifi_family = AF_UNSPEC;
+	iface_hdr.ifi_type = iface->ifi_type;
+	iface_hdr.ifi_index = iface->index;
+	if (up) {
+		iface_hdr.ifi_flags = iface->flags | IFF_UP;
 	} else {
-		if (new == iface->v4_address) {
-			iface->v4_address = new->next;
-		} else {
-			before = iface->v4_address;
-			
-			while (before->next != new) {
-				before = before->next;
-			}
-			
-			before->next = new->next;
-		}
+		iface_hdr.ifi_flags = iface->flags & ~IFF_UP;
+	}
+	iface_hdr.ifi_change = 0xFFFFFFFF;
+	
+	msg = nlmsg_alloc_simple (RTM_NEWLINK, NLM_F_REQUEST);
+	ret = nlmsg_append (msg, &iface_hdr, sizeof (iface_hdr), NLMSG_ALIGNTO);
+	
+	if (ret != 0) {
+		nlmsg_free (msg);
 		
-		free (new);
-	}
-}
-
-void interfaces_manual_del_ipv4 (int sock, Interface *interface, IPv4 *address) {
-	struct msghdr rtnl_msg;
-	struct iovec io;
-	struct sockaddr_nl kernel;
-	char buffer[8192];
-	int len;
-	struct nlmsghdr *nl;
-	struct ifaddrmsg *ifa;
-	struct rtattr *rta;
-	struct nlmsgerr *l_err;
-	struct sockaddr_nl local_nl;
-	socklen_t local_size;
-	
-	/* Recuperar el puerto local del netlink */
-	local_size = sizeof (local_nl);
-	getsockname (sock, (struct sockaddr *) &local_nl, &local_size);
-	
-	memset (&kernel, 0, sizeof (kernel));
-	memset (buffer, 0, sizeof (buffer));
-	memset (&rtnl_msg, 0, sizeof (rtnl_msg));
-	memset (&io, 0, sizeof (io));
-	
-	kernel.nl_family = AF_NETLINK; /* fill-in kernel address (destination of our message) */
-	kernel.nl_groups = 0;
-	
-	nl = (struct nlmsghdr *) buffer;
-	nl->nlmsg_len = NLMSG_LENGTH(sizeof(struct ifaddrmsg));
-	nl->nlmsg_type = RTM_DELADDR;
-	nl->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
-	nl->nlmsg_seq = global_nl_seq++;
-	nl->nlmsg_pid = local_nl.nl_pid;
-	
-	ifa = (struct ifaddrmsg*) NLMSG_DATA (nl);
-	ifa->ifa_family = AF_INET; // we only get ipv4 address here
-	ifa->ifa_prefixlen = address->prefix;
-	ifa->ifa_flags = IFA_F_PERMANENT;
-	ifa->ifa_scope = 0;
-	ifa->ifa_index = interface->index;
-	
-	rta = (struct rtattr*) IFA_RTA(ifa);
-	rta->rta_type = IFA_LOCAL;
-	memcpy (RTA_DATA(rta), &address->sin_addr, sizeof (struct in_addr));
-	rta->rta_len = RTA_LENGTH(sizeof (struct in_addr));
-	// update nlmsghdr length
-	nl->nlmsg_len = NLMSG_ALIGN(nl->nlmsg_len) + rta->rta_len;
-	
-	// del interface address
-	len = sizeof (buffer) - nl->nlmsg_len;
-	rta = (struct rtattr*) RTA_NEXT (rta, len);
-	rta->rta_type = IFA_ADDRESS;
-	memcpy (RTA_DATA(rta), &address->sin_addr, sizeof (struct in_addr));
-	rta->rta_len = RTA_LENGTH(sizeof (struct in_addr));
-	// update nlmsghdr length
-	nl->nlmsg_len += rta->rta_len;
-	
-	io.iov_base = buffer;
-	io.iov_len = nl->nlmsg_len;
-	
-	rtnl_msg.msg_iov = &io;
-	rtnl_msg.msg_iovlen = 1;
-	rtnl_msg.msg_name = &kernel;
-	rtnl_msg.msg_namelen = sizeof(kernel);
-	
-	len = sendmsg (sock, (struct msghdr *) &rtnl_msg, 0);
-	
-	/* Esperar la respuesta */
-	memset(&io, 0, sizeof(io));
-	memset(&rtnl_msg, 0, sizeof(rtnl_msg));
-	
-	io.iov_base = buffer;
-	io.iov_len = sizeof (buffer);
-	rtnl_msg.msg_iov = &io;
-	rtnl_msg.msg_iovlen = 1;
-	rtnl_msg.msg_name = &kernel;
-	rtnl_msg.msg_namelen = sizeof(kernel);
-	
-	len = recvmsg(sock, &rtnl_msg, 0);
-	nl = (struct nlmsghdr *) buffer;
-	for (; NLMSG_OK(nl, len); nl = NLMSG_NEXT(nl, len)) {
-		if (nl->nlmsg_type == NLMSG_DONE) {
-			printf ("DEL IP Msg type: DONE!\n");
-			break;
-		}
-		if (nl->nlmsg_type == NLMSG_ERROR) {
-			l_err = (struct nlmsgerr*) NLMSG_DATA (nl);
-			if (nl->nlmsg_len < NLMSG_LENGTH (sizeof (struct nlmsgerr))) {
-				printf ("DEL IP Error tamaño truncado\n");
-			} else if (l_err->error != 0) {
-				// Error:
-				printf ("DEL IP Error: %i\n", l_err->error);
-			}
-			break;
-		}
-	}
-}
-
-void interfaces_manual_add_ipv4 (int sock, Interface *interface, IPv4 *address) {
-	struct msghdr rtnl_msg;
-	struct iovec io;
-	struct sockaddr_nl kernel;
-	char buffer[8192];
-	int len;
-	struct nlmsghdr *nl;
-	struct ifaddrmsg *ifa;
-	struct rtattr *rta;
-	struct nlmsgerr *l_err;
-	struct sockaddr_nl local_nl;
-	socklen_t local_size;
-	
-	/* Recuperar el puerto local del netlink */
-	local_size = sizeof (local_nl);
-	getsockname (sock, (struct sockaddr *) &local_nl, &local_size);
-	
-	memset (&kernel, 0, sizeof (kernel));
-	memset (buffer, 0, sizeof (buffer));
-	memset (&io, 0, sizeof (io));
-	memset (&rtnl_msg, 0, sizeof (rtnl_msg));
-	
-	kernel.nl_family = AF_NETLINK; /* fill-in kernel address (destination of our message) */
-	kernel.nl_groups = 0;
-	
-	nl = (struct nlmsghdr *) buffer;
-	nl->nlmsg_len = NLMSG_LENGTH(sizeof(struct ifaddrmsg));
-	nl->nlmsg_type = RTM_NEWADDR;
-	nl->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
-	nl->nlmsg_seq = global_nl_seq++;
-	nl->nlmsg_pid = local_nl.nl_pid;
-	
-	ifa = (struct ifaddrmsg*) NLMSG_DATA (nl);
-	ifa->ifa_family = AF_INET; // we only get ipv4 address here
-	ifa->ifa_prefixlen = address->prefix;
-	ifa->ifa_flags = IFA_F_PERMANENT;
-	ifa->ifa_scope = 0;
-	ifa->ifa_index = interface->index;
-	
-	rta = (struct rtattr*) IFA_RTA(ifa);
-	rta->rta_type = IFA_LOCAL;
-	memcpy (RTA_DATA(rta), &address->sin_addr, sizeof (struct in_addr));
-	rta->rta_len = RTA_LENGTH(sizeof (struct in_addr));
-	// update nlmsghdr length
-	nl->nlmsg_len = NLMSG_ALIGN(nl->nlmsg_len) + rta->rta_len;
-	
-	// add interface address
-	len = sizeof (buffer) - nl->nlmsg_len;
-	rta = (struct rtattr*) RTA_NEXT (rta, len);
-	rta->rta_type = IFA_ADDRESS;
-	memcpy (RTA_DATA(rta), &address->sin_addr, sizeof (struct in_addr));
-	rta->rta_len = RTA_LENGTH(sizeof (struct in_addr));
-	// update nlmsghdr length
-	nl->nlmsg_len += rta->rta_len;
-	
-	io.iov_base = buffer;
-	io.iov_len = nl->nlmsg_len;
-	
-	rtnl_msg.msg_iov = &io;
-	rtnl_msg.msg_iovlen = 1;
-	rtnl_msg.msg_name = &kernel;
-	rtnl_msg.msg_namelen = sizeof(kernel);
-	
-	len = sendmsg (sock, (struct msghdr *) &rtnl_msg, 0);
-	
-	/* Esperar la respuesta */
-	memset (&io, 0, sizeof (io));
-	memset (&rtnl_msg, 0, sizeof (rtnl_msg));
-	memset (buffer, 0, sizeof (buffer));
-	
-	io.iov_base = buffer;
-	io.iov_len = sizeof (buffer);
-	rtnl_msg.msg_iov = &io;
-	rtnl_msg.msg_iovlen = 1;
-	rtnl_msg.msg_name = &kernel;
-	rtnl_msg.msg_namelen = sizeof(kernel);
-	
-	len = recvmsg(sock, &rtnl_msg, 0);
-	nl = (struct nlmsghdr *) buffer;
-	for (; NLMSG_OK(nl, len); nl = NLMSG_NEXT(nl, len)) {
-		if (nl->nlmsg_type == NLMSG_DONE) {
-			printf ("Add IP Msg type: DONE!\n");
-			break;
-		}
-		if (nl->nlmsg_type == NLMSG_ERROR) {
-			l_err = (struct nlmsgerr*) NLMSG_DATA (nl);
-			if (nl->nlmsg_len < NLMSG_LENGTH (sizeof (struct nlmsgerr))) {
-				printf ("Add IP Error tamaño truncado\n");
-			} else if (l_err->error != 0) {
-				// Error:
-				printf ("Add IP Error: %i\n", l_err->error);
-			}
-			break;
-		}
-	}
-}
-
-void interfaces_bring_up (int sock, Interface *interface) {
-	struct msghdr rtnl_msg;
-	struct iovec io;
-	struct sockaddr_nl kernel;
-	char buffer[8192];
-	int len;
-	
-	struct nlmsghdr *nl;
-	struct ifinfomsg *ifi;
-	struct nlmsgerr *l_err;
-	
-	struct sockaddr_nl local_nl;
-	socklen_t local_size;
-	
-	/* Recuperar el puerto local del netlink */
-	local_size = sizeof (local_nl);
-	getsockname (sock, (struct sockaddr *) &local_nl, &local_size);
-	
-	memset (&rtnl_msg, 0, sizeof (rtnl_msg));
-	memset (&kernel, 0, sizeof (kernel));
-	memset (buffer, 0, sizeof (buffer));
-	
-	kernel.nl_family = AF_NETLINK; /* fill-in kernel address (destination of our message) */
-	kernel.nl_groups = 0;
-	
-	nl = (struct nlmsghdr *) buffer;
-	nl->nlmsg_len = NLMSG_LENGTH (sizeof (struct ifinfomsg));
-	nl->nlmsg_type = RTM_NEWLINK;
-	nl->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
-	nl->nlmsg_seq = global_nl_seq++;
-	nl->nlmsg_pid = local_nl.nl_pid;
-	
-	ifi = (struct ifinfomsg*) NLMSG_DATA (nl);
-	ifi->ifi_family = AF_PACKET;
-	ifi->ifi_index = interface->index;
-	ifi->ifi_change |= IFF_UP;
-	ifi->ifi_flags |= IFF_UP;
-	
-	io.iov_base = buffer;
-	io.iov_len = nl->nlmsg_len;
-	rtnl_msg.msg_iov = &io;
-	rtnl_msg.msg_iovlen = 1;
-	rtnl_msg.msg_name = &kernel;
-	rtnl_msg.msg_namelen = sizeof (kernel);
-	
-	len = sendmsg (sock, (struct msghdr *) &rtnl_msg, 0);
-	
-	/* Esperar la respuesta */
-	memset (&io, 0, sizeof (io));
-	memset (&rtnl_msg, 0, sizeof (rtnl_msg));
-	
-	io.iov_base = buffer;
-	io.iov_len = sizeof (buffer);
-	rtnl_msg.msg_iov = &io;
-	rtnl_msg.msg_iovlen = 1;
-	rtnl_msg.msg_name = &kernel;
-	rtnl_msg.msg_namelen = sizeof (kernel);
-	
-	len = recvmsg (sock, &rtnl_msg, 0);
-	nl = (struct nlmsghdr *) buffer;
-	for (; NLMSG_OK(nl, len); nl = NLMSG_NEXT(nl, len)) {
-		if (nl->nlmsg_type == NLMSG_DONE) {
-			printf ("Bring UP Msg type: DONE!\n");
-			break;
-		}
-		if (nl->nlmsg_type == NLMSG_ERROR) {
-			l_err = (struct nlmsgerr*) NLMSG_DATA (nl);
-			if (nl->nlmsg_len < NLMSG_LENGTH (sizeof (struct nlmsgerr))) {
-				printf ("Bring up Error tamaño truncado\n");
-			} else if (l_err->error != 0) {
-				// Error:
-				printf ("Bring up Error: %i\n", l_err->error);
-			}
-			break;
-		}
-	}
-}
-
-void interfaces_bring_down (int sock, Interface *interface) {
-	struct msghdr rtnl_msg;
-	struct iovec io;
-	struct sockaddr_nl kernel;
-	char buffer[8192];
-	int len;
-	
-	struct nlmsghdr *nl;
-	struct ifinfomsg *ifi;
-	struct nlmsgerr *l_err;
-	
-	struct sockaddr_nl local_nl;
-	socklen_t local_size;
-	
-	/* Recuperar el puerto local del netlink */
-	local_size = sizeof (local_nl);
-	getsockname (sock, (struct sockaddr *) &local_nl, &local_size);
-	
-	memset (&rtnl_msg, 0, sizeof (rtnl_msg));
-	memset (&kernel, 0, sizeof (kernel));
-	memset (buffer, 0, sizeof (buffer));
-	
-	kernel.nl_family = AF_NETLINK; /* fill-in kernel address (destination of our message) */
-	kernel.nl_groups = 0;
-	
-	nl = (struct nlmsghdr *) buffer;
-	nl->nlmsg_len = NLMSG_LENGTH (sizeof (struct ifinfomsg));
-	nl->nlmsg_type = RTM_NEWLINK;
-	nl->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
-	nl->nlmsg_seq = global_nl_seq++;
-	nl->nlmsg_pid = local_nl.nl_pid;
-	
-	ifi = (struct ifinfomsg*) NLMSG_DATA (nl);
-	ifi->ifi_family = AF_PACKET;
-	ifi->ifi_index = interface->index;
-	ifi->ifi_change |= IFF_UP;
-	
-	io.iov_base = buffer;
-	io.iov_len = nl->nlmsg_len;
-	rtnl_msg.msg_iov = &io;
-	rtnl_msg.msg_iovlen = 1;
-	rtnl_msg.msg_name = &kernel;
-	rtnl_msg.msg_namelen = sizeof (kernel);
-	
-	len = sendmsg (sock, (struct msghdr *) &rtnl_msg, 0);
-	
-	/* Esperar la respuesta */
-	memset (&io, 0, sizeof (io));
-	memset (&rtnl_msg, 0, sizeof (rtnl_msg));
-	
-	io.iov_base = buffer;
-	io.iov_len = sizeof (buffer);
-	rtnl_msg.msg_iov = &io;
-	rtnl_msg.msg_iovlen = 1;
-	rtnl_msg.msg_name = &kernel;
-	rtnl_msg.msg_namelen = sizeof (kernel);
-	
-	len = recvmsg (sock, &rtnl_msg, 0);
-	nl = (struct nlmsghdr *) buffer;
-	for (; NLMSG_OK(nl, len); nl = NLMSG_NEXT(nl, len)) {
-		if (nl->nlmsg_type == NLMSG_DONE) {
-			printf ("Bring DOWN Msg type: DONE!\n");
-			break;
-		}
-		if (nl->nlmsg_type == NLMSG_ERROR) {
-			l_err = (struct nlmsgerr*) NLMSG_DATA (nl);
-			if (nl->nlmsg_len < NLMSG_LENGTH (sizeof (struct nlmsgerr))) {
-				printf ("Bring down Error tamaño truncado\n");
-			} else if (l_err->error != 0) {
-				// Error:
-				printf ("Bring down Error: %i\n", l_err->error);
-			}
-			break;
-		}
-	}
-}
-
-void interfaces_clear_all_ipv4_address (NetworkInadorHandle *handle, Interface *interface) {
-	IPv4 *address;
-	
-	address = interface->v4_address;
-	
-	while (address != NULL) {
-		interfaces_manual_del_ipv4 (handle->netlink_sock_request, interface, address);
-		address = address->next;
-	}
-}
-
-void interfaces_list_all (NetworkInadorHandle *handle, int sock) {
-	struct msghdr rtnl_msg;    /* generic msghdr struct for use with sendmsg */
-	struct iovec io;
-	nl_req_t req;
-	struct sockaddr_nl kernel;
-	char reply[8192]; /* a large buffer */
-	int len;
-	
-	/* Para la respuesta */
-	struct nlmsghdr *msg_ptr;    /* pointer to current part */
-	
-	struct sockaddr_nl local_nl;
-	socklen_t local_size;
-	
-	/* Recuperar el puerto local del netlink */
-	local_size = sizeof (local_nl);
-	getsockname (sock, (struct sockaddr *) &local_nl, &local_size);
-	
-	memset(&rtnl_msg, 0, sizeof(rtnl_msg));
-	memset(&kernel, 0, sizeof(kernel));
-	memset(&req, 0, sizeof(req));
-
-	kernel.nl_family = AF_NETLINK; /* fill-in kernel address (destination of our message) */
-	kernel.nl_groups = 0;
-	
-	req.hdr.nlmsg_len = NLMSG_LENGTH(sizeof(struct rtgenmsg));
-	req.hdr.nlmsg_type = RTM_GETLINK;
-	req.hdr.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
-	req.hdr.nlmsg_seq = global_nl_seq++;
-	req.hdr.nlmsg_pid = local_nl.nl_pid;
-	req.gen.rtgen_family = AF_PACKET; /*  no preferred AF, we will get *all* interfaces */
-
-	io.iov_base = &req;
-	io.iov_len = req.hdr.nlmsg_len;
-	rtnl_msg.msg_iov = &io;
-	rtnl_msg.msg_iovlen = 1;
-	rtnl_msg.msg_name = &kernel;
-	rtnl_msg.msg_namelen = sizeof(kernel);
-	
-	sendmsg (sock, (struct msghdr *) &rtnl_msg, 0);
-	
-	/* Esperar la respuesta */
-	memset(&io, 0, sizeof(io));
-	memset(&rtnl_msg, 0, sizeof(rtnl_msg));
-	
-	io.iov_base = reply;
-	io.iov_len = sizeof (reply);
-	rtnl_msg.msg_iov = &io;
-	rtnl_msg.msg_iovlen = 1;
-	rtnl_msg.msg_name = &kernel;
-	rtnl_msg.msg_namelen = sizeof(kernel);
-
-	while ((len = recvmsg(sock, &rtnl_msg, 0)) > 0) { /* read lots of data */
-		msg_ptr = (struct nlmsghdr *) reply;
-		if (msg_ptr->nlmsg_type == NLMSG_DONE) break;
-	
-		for (; NLMSG_OK(msg_ptr, len); msg_ptr = NLMSG_NEXT(msg_ptr, len)) {
-			/* Como listamos interfaces, buscamos todos los mensajes RTM_NEWLINK */
-			if (msg_ptr->nlmsg_type == RTM_NEWLINK) {
-				interfaces_add_or_update_rtnl_link (handle, msg_ptr, 1);
-			}
-		}
+		return -1;
 	}
 	
-	_interfaces_list_ipv4_address (handle, sock);
+	nl_complete_msg (handle->nl_sock_route, msg);
+	
+	ret = nl_send (handle->nl_sock_route, msg);
+	
+	nlmsg_free (msg);
+	if (ret <= 0) {
+		return -1;
+	}
+	
+	error = 0;
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_VALID, NL_CB_CUSTOM, _interfaces_wait_ack_or_error, &error);
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_INVALID, NL_CB_CUSTOM, _interfaces_wait_ack_or_error, &error);
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_ACK, NL_CB_CUSTOM, _interfaces_wait_ack_or_error, &error);
+	nl_socket_modify_err_cb (handle->nl_sock_route, NL_CB_CUSTOM, _interfaces_wait_error, &error);
+	
+	nl_recvmsgs_default (handle->nl_sock_route);
+	
+	if (ret != 0 || error < 0) {
+		return -1;
+	}
+	
+	return 0;
 }
 
+int interfaces_change_set_up (NetworkInadorHandle *handle, int index) {
+	return _interfaces_change_admin_up (handle, index, TRUE);
+}
+
+int interfaces_change_set_down (NetworkInadorHandle *handle, int index) {
+	return _interfaces_change_admin_up (handle, index, FALSE);
+}
+
+int interfaces_change_name (NetworkInadorHandle *handle, int index, char * new_name) {
+	/* IFNAMSIZ */
+	struct nl_msg * msg;
+	struct ifinfomsg iface_hdr;
+	int ret, error;
+	Interface *iface;
+	
+	iface = _interfaces_locate_by_index (handle->interfaces, index);
+	
+	if (iface == NULL) {
+		printf ("Error, solicitaron eliminar interfaz que ya no existe\n");
+		
+		return -1;
+	}
+	
+	if (strlen (new_name) > IFNAMSIZ) {
+		return -1;
+	}
+	
+	iface_hdr.ifi_family = AF_UNSPEC;
+	iface_hdr.ifi_type = iface->ifi_type;
+	iface_hdr.ifi_index = iface->index;
+	iface_hdr.ifi_flags = iface->flags;
+	iface_hdr.ifi_change = 0xFFFFFFFF;
+	
+	msg = nlmsg_alloc_simple (RTM_NEWLINK, NLM_F_REQUEST);
+	ret = nlmsg_append (msg, &iface_hdr, sizeof (iface_hdr), NLMSG_ALIGNTO);
+	
+	if (ret != 0) {
+		nlmsg_free (msg);
+		
+		return -1;
+	}
+	
+	ret = nla_put (msg, IFLA_IFNAME, strlen (new_name) + 1, new_name);
+	
+	if (ret != 0) {
+		nlmsg_free (msg);
+		
+		return -1;
+	}
+	
+	nl_complete_msg (handle->nl_sock_route, msg);
+	
+	ret = nl_send (handle->nl_sock_route, msg);
+	
+	nlmsg_free (msg);
+	if (ret <= 0) {
+		return -1;
+	}
+	
+	error = 0;
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_VALID, NL_CB_CUSTOM, _interfaces_wait_ack_or_error, &error);
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_INVALID, NL_CB_CUSTOM, _interfaces_wait_ack_or_error, &error);
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_ACK, NL_CB_CUSTOM, _interfaces_wait_ack_or_error, &error);
+	nl_socket_modify_err_cb (handle->nl_sock_route, NL_CB_CUSTOM, _interfaces_wait_error, &error);
+	
+	ret = nl_recvmsgs_default (handle->nl_sock_route);
+	
+	if (ret != 0 || error < 0) {
+		return -1;
+	}
+	
+	return 0;
+}
+
+void interfaces_init (NetworkInadorHandle *handle) {
+	/* Si es la primera vez que nos llaman, descargar una primera lista de interfaces */
+	struct nl_msg * msg;
+	struct rtgenmsg rt_hdr = {
+		.rtgen_family = AF_PACKET,
+	};
+	int ret;
+	
+	msg = nlmsg_alloc_simple (RTM_GETLINK, NLM_F_REQUEST | NLM_F_DUMP);
+	ret = nlmsg_append (msg, &rt_hdr, sizeof (rt_hdr), NLMSG_ALIGNTO);
+	
+	if (ret != 0) {
+		return;
+	}
+	
+	nl_complete_msg (handle->nl_sock_route, msg);
+	
+	ret = nl_send (handle->nl_sock_route, msg);
+	
+	nlmsg_free (msg);
+	
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_VALID, NL_CB_CUSTOM, _interfaces_list_first_time, handle);
+	
+	nl_recvmsgs_default (handle->nl_sock_route);
+}
 

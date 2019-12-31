@@ -1,8 +1,8 @@
 /*
- * network-inador.h
+ * common.h
  * This file is part of Network-inador
  *
- * Copyright (C) 2011 - Félix Arreola Rodríguez
+ * Copyright (C) 2019, 2020 - Félix Arreola Rodríguez
  *
  * Network-inador is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,64 +20,23 @@
  * Boston, MA  02110-1301  USA
  */
 
-#ifndef __NETWORK_INADOR_H__
-#define __NETWORK_INADOR_H__
-
-#include <stdint.h>
+#ifndef __COMMON_H__
+#define __COMMON_H__
 
 #include <netinet/in.h>
-#include <linux/if.h>
 #include <net/ethernet.h>
-
-#include <unistd.h>
+#include <linux/if.h>
 
 #include <glib.h>
+#include <gmodule.h>
 
-/* Para almacenar la información de DHCP */
-enum {
-	IFACE_NO_DHCP_RUNNING = 0,
-	IFACE_DHCP_CLIENT,
-};
+#ifndef FALSE
+#define FALSE 0
+#endif
 
-enum {
-	DHCP_CLIENT_DECONFIG = 1,
-	DHCP_CLIENT_LEASEFAIL,
-	DHCP_CLIENT_BOUND,
-	DHCP_CLIENT_RENEW,
-	DHCP_CLIENT_NAK
-};
-
-typedef struct _DHCPStateInfo {
-	int type;
-	
-	int read_pipe;
-	GPid process_pid;
-	
-	int client_state;
-} DHCPStateInfo;
-
-typedef struct _IPv4 {
-	struct in_addr sin_addr;
-	uint32_t prefix;
-	
-	unsigned char flags;
-	
-	struct _IPv4 *next;
-} IPv4;
-
-typedef struct _WirelessAccessPoint {
-	int freq;
-	int essid;
-	char bssid[10];
-	
-	struct _WirelessAccessPoint *next;
-} WirelessAccessPoint;
-
-typedef struct {
-	int wiphy;
-	
-	WirelessAccessPoint *scaned_aps;
-} WirelessInfo;
+#ifndef TRUE
+#define TRUE !FALSE
+#endif
 
 typedef struct _Interface {
 	char name[IFNAMSIZ];
@@ -90,6 +49,9 @@ typedef struct _Interface {
 	
 	unsigned int mtu;
 	
+	/* Para las interfaces vlan */
+	unsigned int vlan_parent;
+	
 	/* Banderas estilo ioctl */
 	short flags;
 	
@@ -101,37 +63,24 @@ typedef struct _Interface {
 	int is_bridge;
 	int is_vlan;
 	int is_nlmon;
+	int is_dummy;
 	
-	IPv4 *v4_address;
+	//IPv4 *v4_address;
 	
-	DHCPStateInfo dhcp_info;
+	//DHCPStateInfo dhcp_info;
 	
 	/* Información wireless */
-	WirelessInfo *wireless;
-	
-	struct _Interface *next;
+	//WirelessInfo *wireless;
 } Interface;
 
-typedef struct _Routev4 {
-	struct in_addr dest;
-	uint32_t prefix;
-	
-	struct in_addr gateway;
-	unsigned int index;
-	
-	unsigned char table;
-	unsigned char type;
-	
-	struct _Routev4 *next;
-} Routev4;
-
 typedef struct {
-	Interface *interfaces;
-	Routev4 *rtable_v4;
+	GList *interfaces;
+	//Routev4 *rtable_v4;
 	
-	int netlink_sock_request;
-	int netlink_sock_request_generic;
+	struct nl_sock * nl_sock_route;
+	struct nl_sock * nl_sock_route_events;
+	guint route_events_source;
 } NetworkInadorHandle;
 
-#endif
+#endif /* __COMMON_H__ */
 
