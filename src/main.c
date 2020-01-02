@@ -102,6 +102,10 @@ int main (int argc, char *argv[]) {
 	NetworkInadorHandle handle;
 	GMainLoop *loop = NULL;
 	struct nl_sock * sock_req;
+
+#if !defined(GLIB_VERSION_2_36)
+    g_type_init ();
+#endif
 	
 	_init_handle (&handle);
 	
@@ -118,10 +122,6 @@ int main (int argc, char *argv[]) {
 	
 	/* Crear el socket que escucha eventos */
 	netlink_events_setup (&handle);
-	
-#if !defined(GLIB_VERSION_2_36)
-    g_type_init ();
-#endif
 	
 	loop = g_main_loop_new (NULL, FALSE);
 	

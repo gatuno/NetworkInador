@@ -31,4 +31,7 @@
 int ip_address_receive_message_newaddr (struct nl_msg *msg, void *arg);
 void ip_address_init (NetworkInadorHandle *handle);
 
+int ip_address_add_ip (NetworkInadorHandle *handle, int index, IPAddr *addr);
+int ip_address_del_ip (NetworkInadorHandle *handle, int index, IPAddr *addr);
+
 #endif

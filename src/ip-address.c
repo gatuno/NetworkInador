@@ -180,6 +180,173 @@ int ip_address_receive_message_deladdr (struct nl_msg *msg, void *arg) {
 	return NL_SKIP;
 }
 
+static int _ip_address_wait_ack_or_error (struct nl_msg *msg, void *arg) {
+	int *ret = (int *) arg;
+	struct nlmsgerr *l_err;
+	struct nlmsghdr *reply;
+	
+	reply = nlmsg_hdr (msg);
+	
+	if (reply->nlmsg_type == NLMSG_ERROR) {
+		l_err = nlmsg_data (reply);
+		
+		*ret = l_err->error;
+	}
+	
+	return NL_SKIP;
+}
+
+static int _ip_address_wait_error (struct sockaddr_nl *nla, struct nlmsgerr *l_err, void *arg) {
+	int *ret = (int *) arg;
+	
+	*ret = l_err->error;
+	
+	return NL_SKIP;
+}
+
+int ip_address_add_ip (NetworkInadorHandle *handle, int index, IPAddr *addr) {
+	struct nl_msg * msg;
+	struct ifaddrmsg addr_hdr;
+	int ret, error;
+	Interface *iface;
+	
+	iface = _interfaces_locate_by_index (handle->interfaces, index);
+	
+	if (iface == NULL) {
+		printf ("Error, solicitaron operación sobre interfaz que no existe\n");
+		
+		return -1;
+	}
+	
+	addr_hdr.ifa_family = addr->family;
+	addr_hdr.ifa_prefixlen = addr->prefix;
+	addr_hdr.ifa_flags = addr->flags;
+	addr_hdr.ifa_scope = addr->scope;
+	addr_hdr.ifa_index = index;
+	
+	msg = nlmsg_alloc_simple (RTM_NEWADDR, NLM_F_REQUEST);
+	ret = nlmsg_append (msg, &addr_hdr, sizeof (addr_hdr), NLMSG_ALIGNTO);
+	
+	if (ret != 0) {
+		nlmsg_free (msg);
+		
+		return -1;
+	}
+	
+	if (addr->family == AF_INET) {
+		ret = nla_put (msg, IFA_LOCAL, sizeof (addr->sin_addr), &addr->sin_addr);
+		ret = nla_put (msg, IFA_ADDRESS, sizeof (addr->sin_addr), &addr->sin_addr);
+	} else {
+		ret = nla_put (msg, IFA_LOCAL, sizeof (addr->sin6_addr), &addr->sin6_addr);
+		ret = nla_put (msg, IFA_ADDRESS, sizeof (addr->sin6_addr), &addr->sin6_addr);
+	}
+	
+	if (ret != 0) {
+		nlmsg_free (msg);
+		
+		return -1;
+	}
+	
+	nl_complete_msg (handle->nl_sock_route, msg);
+	
+	ret = nl_send (handle->nl_sock_route, msg);
+	
+	nlmsg_free (msg);
+	if (ret <= 0) {
+		return -1;
+	}
+	
+	error = 0;
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_VALID, NL_CB_CUSTOM, _ip_address_wait_ack_or_error, &error);
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_INVALID, NL_CB_CUSTOM, _ip_address_wait_ack_or_error, &error);
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_ACK, NL_CB_CUSTOM, _ip_address_wait_ack_or_error, &error);
+	nl_socket_modify_err_cb (handle->nl_sock_route, NL_CB_CUSTOM, _ip_address_wait_error, &error);
+	
+	nl_recvmsgs_default (handle->nl_sock_route);
+	
+	if (ret <= 0 || error < 0) {
+		return -1;
+	}
+	
+	return 0;
+}
+
+int ip_address_del_ip (NetworkInadorHandle *handle, int index, IPAddr *addr) {
+	struct nl_msg * msg;
+	struct ifaddrmsg addr_hdr;
+	int ret, error;
+	Interface *iface;
+	GList *addr_pos;
+	
+	iface = _interfaces_locate_by_index (handle->interfaces, index);
+	
+	if (iface == NULL) {
+		printf ("Error, solicitaron operación sobre interfaz que no existe\n");
+		
+		return -1;
+	}
+	
+	addr_pos = g_list_find (iface->address, addr);
+	
+	if (addr_pos == NULL) {
+		printf ("Error, la dirección solicitada no pertenece a la interfaz\n");
+		
+		return -1;
+	}
+	
+	addr_hdr.ifa_family = addr->family;
+	addr_hdr.ifa_prefixlen = addr->prefix;
+	addr_hdr.ifa_flags = addr->flags;
+	addr_hdr.ifa_scope = addr->scope;
+	addr_hdr.ifa_index = index;
+	
+	msg = nlmsg_alloc_simple (RTM_DELADDR, NLM_F_REQUEST);
+	ret = nlmsg_append (msg, &addr_hdr, sizeof (addr_hdr), NLMSG_ALIGNTO);
+	
+	if (ret != 0) {
+		nlmsg_free (msg);
+		
+		return -1;
+	}
+	
+	if (addr->family == AF_INET) {
+		ret = nla_put (msg, IFA_LOCAL, sizeof (addr->sin_addr), &addr->sin_addr);
+		ret = nla_put (msg, IFA_ADDRESS, sizeof (addr->sin_addr), &addr->sin_addr);
+	} else {
+		ret = nla_put (msg, IFA_LOCAL, sizeof (addr->sin6_addr), &addr->sin6_addr);
+		ret = nla_put (msg, IFA_ADDRESS, sizeof (addr->sin6_addr), &addr->sin6_addr);
+	}
+	
+	if (ret != 0) {
+		nlmsg_free (msg);
+		
+		return -1;
+	}
+	
+	nl_complete_msg (handle->nl_sock_route, msg);
+	
+	ret = nl_send (handle->nl_sock_route, msg);
+	
+	nlmsg_free (msg);
+	if (ret <= 0) {
+		return -1;
+	}
+	
+	error = 0;
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_VALID, NL_CB_CUSTOM, _ip_address_wait_ack_or_error, &error);
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_INVALID, NL_CB_CUSTOM, _ip_address_wait_ack_or_error, &error);
+	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_ACK, NL_CB_CUSTOM, _ip_address_wait_ack_or_error, &error);
+	nl_socket_modify_err_cb (handle->nl_sock_route, NL_CB_CUSTOM, _ip_address_wait_error, &error);
+	
+	nl_recvmsgs_default (handle->nl_sock_route);
+	
+	if (ret <= 0 || error < 0) {
+		return -1;
+	}
+	
+	return 0;
+}
+
 void ip_address_init (NetworkInadorHandle *handle) {
 	/* Si es la primera vez que nos llaman, descargar una primera lista de direcciones en todas las interfaces */
 	struct nl_msg * msg;

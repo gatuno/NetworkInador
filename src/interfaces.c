@@ -280,7 +280,7 @@ int interfaces_change_mac_address (NetworkInadorHandle *handle, int index, void 
 	iface = _interfaces_locate_by_index (handle->interfaces, index);
 	
 	if (iface == NULL) {
-		printf ("Error, solicitaron eliminar interfaz que ya no existe\n");
+		printf ("Error, solicitaron operación sobre interfaz que no existe\n");
 		
 		return -1;
 	}
@@ -325,7 +325,7 @@ int interfaces_change_mac_address (NetworkInadorHandle *handle, int index, void 
 	
 	nl_recvmsgs_default (handle->nl_sock_route);
 	
-	if (ret != 0 || error < 0) {
+	if (ret <= 0 || error < 0) {
 		return -1;
 	}
 	
@@ -342,7 +342,7 @@ int interfaces_change_mtu (NetworkInadorHandle *handle, int index, uint32_t new_
 	iface = _interfaces_locate_by_index (handle->interfaces, index);
 	
 	if (iface == NULL) {
-		printf ("Error, solicitaron eliminar interfaz que ya no existe\n");
+		printf ("Error, solicitaron operación sobre interfaz que no existe\n");
 		
 		return -1;
 	}
@@ -387,7 +387,7 @@ int interfaces_change_mtu (NetworkInadorHandle *handle, int index, uint32_t new_
 	
 	nl_recvmsgs_default (handle->nl_sock_route);
 	
-	if (ret != 0 || error < 0) {
+	if (ret <= 0 || error < 0) {
 		return -1;
 	}
 	
@@ -403,7 +403,7 @@ static int _interfaces_change_admin_up (NetworkInadorHandle *handle, int index, 
 	iface = _interfaces_locate_by_index (handle->interfaces, index);
 	
 	if (iface == NULL) {
-		printf ("Error, solicitaron eliminar interfaz que ya no existe\n");
+		printf ("Error, solicitaron operación sobre interfaz que no existe\n");
 		
 		return -1;
 	}
@@ -452,7 +452,7 @@ static int _interfaces_change_admin_up (NetworkInadorHandle *handle, int index, 
 	
 	nl_recvmsgs_default (handle->nl_sock_route);
 	
-	if (ret != 0 || error < 0) {
+	if (ret <= 0 || error < 0) {
 		return -1;
 	}
 	
@@ -477,7 +477,7 @@ int interfaces_change_name (NetworkInadorHandle *handle, int index, char * new_n
 	iface = _interfaces_locate_by_index (handle->interfaces, index);
 	
 	if (iface == NULL) {
-		printf ("Error, solicitaron eliminar interfaz que ya no existe\n");
+		printf ("Error, solicitaron operación sobre interfaz que no existe\n");
 		
 		return -1;
 	}
@@ -526,7 +526,7 @@ int interfaces_change_name (NetworkInadorHandle *handle, int index, char * new_n
 	
 	ret = nl_recvmsgs_default (handle->nl_sock_route);
 	
-	if (ret != 0 || error < 0) {
+	if (ret <= 0 || error < 0) {
 		return -1;
 	}
 	

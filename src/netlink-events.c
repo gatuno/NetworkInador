@@ -73,7 +73,7 @@ void netlink_events_setup (NetworkInadorHandle *handle) {
 	}
 	
 	nl_socket_set_nonblocking (sock_req);
-	nl_socket_add_memberships (sock_req, RTNLGRP_LINK, RTNLGRP_IPV4_IFADDR, RTNLGRP_IPV6_IFADDR, 0);
+	nl_socket_add_memberships (sock_req, RTNLGRP_LINK, RTNLGRP_IPV4_IFADDR, RTNLGRP_IPV6_IFADDR, RTNLGRP_IPV6_IFINFO, 0);
 	nl_socket_disable_seq_check (sock_req);
 	nl_socket_modify_cb (sock_req, NL_CB_VALID, NL_CB_CUSTOM, _netlink_events_route_dispatcher, handle);
 	
