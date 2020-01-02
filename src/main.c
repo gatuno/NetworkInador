@@ -131,5 +131,8 @@ int main (int argc, char *argv[]) {
 	
 	g_main_loop_run (loop);
 	
+	/* Detener la llegada de eventos */
+	netlink_events_clear (&handle);
+	
 	return 0;
 }

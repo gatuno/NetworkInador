@@ -85,3 +85,15 @@ void netlink_events_setup (NetworkInadorHandle *handle) {
 	handle->nl_sock_route_events = sock_req;
 }
 
+void netlink_events_clear (NetworkInadorHandle *handle) {
+	/* Primero, detener los eventos del source watch */
+	
+	g_source_remove (handle->route_events_source);
+	
+	handle->route_events_source = 0;
+	/* Cerrar el socket */
+	
+	nl_close (handle->nl_sock_route_events);
+	handle->nl_sock_route_events = NULL;
+}
+
