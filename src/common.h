@@ -23,6 +23,8 @@
 #ifndef __COMMON_H__
 #define __COMMON_H__
 
+#include <stdint.h>
+
 #include <netinet/in.h>
 #include <net/ethernet.h>
 #include <linux/if.h>
@@ -37,6 +39,18 @@
 #ifndef TRUE
 #define TRUE !FALSE
 #endif
+
+typedef struct _IPAddr {
+	sa_family_t family;
+	union {
+		struct in_addr sin_addr;
+		struct in6_addr sin6_addr;
+	};
+	uint32_t prefix;
+	
+	unsigned char flags;
+	unsigned char scope;
+} IPAddr;
 
 typedef struct _Interface {
 	char name[IFNAMSIZ];
@@ -65,7 +79,7 @@ typedef struct _Interface {
 	int is_nlmon;
 	int is_dummy;
 	
-	//IPv4 *v4_address;
+	GList *address;
 	
 	//DHCPStateInfo dhcp_info;
 	

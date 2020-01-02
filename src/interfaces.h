@@ -23,11 +23,16 @@
 #ifndef __INTERFACES_H__
 #define __INTERFACES_H__
 
+#include <netlink/socket.h>
+#include <netlink/msg.h>
+
 #include "common.h"
 
 void interfaces_init (NetworkInadorHandle *handle);
 int interface_receive_message_newlink (struct nl_msg *msg, void *arg);
 int interface_receive_message_dellink (struct nl_msg *msg, void *arg);
+
+Interface * _interfaces_locate_by_index (GList *list, int index);
 
 int interfaces_change_mac_address (NetworkInadorHandle *handle, int index, void *new_mac);
 int interfaces_change_mtu (NetworkInadorHandle *handle, int index, uint32_t new_mtu);

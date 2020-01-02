@@ -3,7 +3,8 @@
 bin_PROGRAMS = network-inador
 network_inador_SOURCES = main.c common.h \
 	netlink-events.c netlink-events.h \
-	interfaces.c interfaces.h
+	interfaces.c interfaces.h \
+	ip-address.c ip-address.h
 
 #network_inador_CPPFLAGS = -DGAMEDATA_DIR=\"$(gamedatadir)/\" -DLOCALEDIR=\"$(localedir)\" $(AM_CPPFLAGS)
 network_inador_CPPFLAGS = -DLOCALEDIR=\"$(localedir)\" $(AM_CPPFLAGS)

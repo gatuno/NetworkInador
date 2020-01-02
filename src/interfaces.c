@@ -30,9 +30,10 @@
 #include <gmodule.h>
 
 #include "common.h"
+#include "interfaces.h"
+#include "ip-address.h"
 
 static int _interfaces_receive_message_interface (struct nl_msg *msg, void *arg, int first_time);
-Interface * _interfaces_locate_by_index (GList *list, int index);
 
 static int _interfaces_list_first_time (struct nl_msg *msg, void *arg) {
 	return _interfaces_receive_message_interface (msg, arg, TRUE);
@@ -262,6 +263,9 @@ int interface_receive_message_dellink (struct nl_msg *msg, void *arg) {
 	}
 	
 	handle->interfaces = g_list_remove (handle->interfaces, iface);
+	
+	/* Antes de eliminar la interfaz, eliminar la lista ligada de todas las direcciones IP */
+	g_list_free_full (iface->address, g_free);
 	
 	g_free (iface);
 }
@@ -553,5 +557,7 @@ void interfaces_init (NetworkInadorHandle *handle) {
 	nl_socket_modify_cb (handle->nl_sock_route, NL_CB_VALID, NL_CB_CUSTOM, _interfaces_list_first_time, handle);
 	
 	nl_recvmsgs_default (handle->nl_sock_route);
+	
+	ip_address_init (handle);
 }
 

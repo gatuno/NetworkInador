@@ -27,6 +27,7 @@
 
 #include "common.h"
 #include "interfaces.h"
+#include "ip-address.h"
 
 static int _netlink_events_route_dispatcher (struct nl_msg *msg, void *arg) {
 	struct nlmsghdr *reply;
@@ -35,12 +36,20 @@ static int _netlink_events_route_dispatcher (struct nl_msg *msg, void *arg) {
 	
 	switch (reply->nlmsg_type) {
 		case RTM_NEWLINK:
-			interface_receive_message_newlink (msg, arg);
+			return interface_receive_message_newlink (msg, arg);
 			break;
 		case RTM_DELLINK:
-			interface_receive_message_dellink (msg, arg);
+			return interface_receive_message_dellink (msg, arg);
+			break;
+		case RTM_NEWADDR:
+			return ip_address_receive_message_newaddr (msg, arg);
+			break;
+		case RTM_DELADDR:
+			return ip_address_receive_message_deladdr (msg, arg);
 			break;
 	}
+	
+	return NL_SKIP;
 }
 
 static gboolean _netlink_events_handle_read (GIOChannel *source, GIOCondition condition, gpointer data) {
@@ -64,7 +73,7 @@ void netlink_events_setup (NetworkInadorHandle *handle) {
 	}
 	
 	nl_socket_set_nonblocking (sock_req);
-	nl_socket_add_memberships (sock_req, RTNLGRP_LINK, 0);
+	nl_socket_add_memberships (sock_req, RTNLGRP_LINK, RTNLGRP_IPV4_IFADDR, RTNLGRP_IPV6_IFADDR, 0);
 	nl_socket_disable_seq_check (sock_req);
 	nl_socket_modify_cb (sock_req, NL_CB_VALID, NL_CB_CUSTOM, _netlink_events_route_dispatcher, handle);
 	
