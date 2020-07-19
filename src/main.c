@@ -46,6 +46,7 @@ static int sigterm_pipe_fds[2] = { -1, -1 };
 static void _init_handle (NetworkInadorHandle *handle) {
 	assert (handle != NULL);
 	
+	memset (handle, 0, sizeof (NetworkInadorHandle));
 	handle->interfaces = NULL;
 }
 
@@ -133,6 +134,8 @@ int main (int argc, char *argv[]) {
 	
 	/* Detener la llegada de eventos */
 	netlink_events_clear (&handle);
+	
+	// nl_socket_free???
 	
 	return 0;
 }

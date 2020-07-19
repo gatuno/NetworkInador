@@ -1,8 +1,8 @@
 /*
- * ip-address.c
+ * wireless_bss.h
  * This file is part of Network-inador
  *
- * Copyright (C) 2019, 2020 - Félix Arreola Rodríguez
+ * Copyright (C) 2020 - Félix Arreola Rodríguez
  *
  * Network-inador is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,19 +20,26 @@
  * Boston, MA  02110-1301  USA
  */
 
-#ifndef __IP_ADDRESS_H__
-#define __IP_ADDRESS_H__
+#ifndef __WIRELESS_BSS__
+#define __WIRELESS_BSS__
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <stdint.h>
+
+#include <netlink/genl/ctrl.h>
 #include <netlink/socket.h>
 #include <netlink/msg.h>
+#include <netlink/genl/genl.h>
+
+#include <linux/nl80211.h>
 
 #include "common.h"
 
-int ip_address_receive_message_newaddr (struct nl_msg *msg, void *arg);
-int ip_address_receive_message_deladdr (struct nl_msg *msg, void *arg);
-void ip_address_init (NetworkInadorHandle *handle);
+int wireless_bss_parse_station_scan (struct nl_msg *msg, void *arg);
+int wireless_bss_finish_scan (struct nl_msg *msg, void *arg);
 
-int ip_address_add_ip (NetworkInadorHandle *handle, int index, IPAddr *addr);
-int ip_address_del_ip (NetworkInadorHandle *handle, int index, IPAddr *addr);
+#endif /* __WIRELESS_BSS__ */
 
-#endif

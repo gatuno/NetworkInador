@@ -25,6 +25,8 @@
 
 #include "common.h"
 
+void netlink_events_create_pair (NetlinkEventPair *pair, int family);
+void netlink_events_clear_pair (NetlinkEventPair *pair);
 void netlink_events_setup (NetworkInadorHandle *handle);
 void netlink_events_clear (NetworkInadorHandle *handle);
 

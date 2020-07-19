@@ -24,6 +24,7 @@
 #define __COMMON_H__
 
 #include <stdint.h>
+#include <time.h>
 
 #include <netinet/in.h>
 #include <net/ethernet.h>
@@ -51,6 +52,45 @@ typedef struct _IPAddr {
 	unsigned char flags;
 	unsigned char scope;
 } IPAddr;
+
+#define SSID_MAX_LEN 32
+
+typedef struct _WirelessBSS {
+	/** Number of counts without seeing this BSS */
+	unsigned int scan_miss_count;
+	/** Index of the last scan update */
+	unsigned int last_update_idx;
+	
+	/** BSSID */
+	uint8_t bssid[ETHER_ADDR_LEN * 2 + 1];
+	/** HESSID */
+	//u8 hessid[ETHER_ADDR_LEN * 2 + 1];
+	/** SSID */
+	uint8_t ssid[SSID_MAX_LEN];
+	/** Length of SSID */
+	size_t ssid_len;
+	/** Frequency of the channel in MHz (e.g., 2412 = channel 1) */
+	int freq;
+	/** Capability information field in host byte order */
+	uint16_t caps;
+	/** Timestamp of last Beacon/Probe Response frame */
+	uint64_t tsf;
+	/** Time of the last update (i.e., Beacon or Probe Response RX) */
+	struct timespec last_update;
+} WirelessBSS;
+
+typedef struct _WirelessInfo {
+	int phy;
+	uint32_t *freqs;
+	int num_freqs;
+	uint32_t caps;
+	gboolean can_scan;
+	gboolean can_scan_ssid;
+	gboolean supported;
+	
+	unsigned int bss_update_idx;
+	GList *aps;
+} WirelessInfo;
 
 typedef struct _Interface {
 	char name[IFNAMSIZ];
@@ -84,16 +124,26 @@ typedef struct _Interface {
 	//DHCPStateInfo dhcp_info;
 	
 	/* Información wireless */
-	//WirelessInfo *wireless;
+	WirelessInfo *wireless;
 } Interface;
+
+/* Para vigilar eventos */
+typedef struct _netlink_event_pair {
+	struct nl_sock * nl_sock;
+	guint source;
+} NetlinkEventPair;
 
 typedef struct {
 	GList *interfaces;
 	//Routev4 *rtable_v4;
 	
 	struct nl_sock * nl_sock_route;
-	struct nl_sock * nl_sock_route_events;
-	guint route_events_source;
+	struct nl_sock * nl_sock_nl80211;
+	
+	NetlinkEventPair route_events;
+	
+	NetlinkEventPair nl80211_scan;
+	NetlinkEventPair nl80211_scan_results;
 } NetworkInadorHandle;
 
 #endif /* __COMMON_H__ */

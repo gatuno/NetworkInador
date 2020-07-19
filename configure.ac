@@ -45,6 +45,10 @@ AC_MSG_CHECKING([if you have libnl-3 installed on your system])
 PKG_CHECK_EXISTS([libnl-3.0 >= LIBNL_VERSION], [AC_MSG_RESULT([yes])], [AC_MSG_FAILURE([libnl-3 not found in your system])])
 PKG_CHECK_MODULES(LIBNL3, [libnl-3.0 >= $LIBNL_VERSION], [], [])
 
+AC_MSG_CHECKING([if you have libnl-gen-3 installed on your system])
+PKG_CHECK_EXISTS([libnl-genl-3.0 >= LIBNL_VERSION], [AC_MSG_RESULT([yes])], [AC_MSG_FAILURE([libnl-gen-3 not found in your system])])
+PKG_CHECK_MODULES(LIBNLGEN3, [libnl-genl-3.0 >= $LIBNL_VERSION], [], [])
+
 AC_CONFIG_HEADERS([config.h])
 
 AC_CONFIG_FILES([

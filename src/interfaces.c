@@ -32,6 +32,7 @@
 #include "common.h"
 #include "interfaces.h"
 #include "ip-address.h"
+#include "wireless_if.h"
 
 static int _interfaces_receive_message_interface (struct nl_msg *msg, void *arg, int first_time);
 
@@ -176,6 +177,10 @@ static int _interfaces_receive_message_interface (struct nl_msg *msg, void *arg,
 			//default:
 				//printf ("RTA Attribute \"%hu\" no procesado\n", nla_type (attr));
 		}
+	}
+	
+	if (was_new) {
+		wireless_interface_check (handle, iface);
 	}
 	
 	return NL_SKIP;
